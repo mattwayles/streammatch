@@ -108,6 +108,7 @@ RULES:
 - Choose up to 6 titles (fewer if the pool is small). The candidates are all currently streaming. Favor the FRESHEST, most-buzzed options: lean toward this year and last year (check "year") and higher "popularity". Surface genuine current standouts and a hidden gem or two — actively AVOID defaulting to the most obvious, generic, evergreen mainstream titles unless one truly nails the mood.
 - Aim for a non-boilerplate mix the user likely hasn't already had recommended a hundred times.
 - ONLY pick from the provided candidates. Use each candidate's exact numeric "id" and its "mediaType" — never invent titles or ids.
+- If an AVOID LIST of previously disliked titles is provided, treat it as a strong negative-taste signal: never pick those titles, and steer away from candidates that are similar in genre, tone, premise, or franchise.
 - If the user's answers were open-ended ("Any"), cast a wider net across the candidates for variety.
 - For each pick write:
   - whyThisFits: 1–2 sharp, specific sentences tying the title directly to the user's mood/answers.
@@ -173,12 +174,19 @@ export interface Candidate {
 export async function selectRecommendations(
   profile: MoodProfile,
   candidates: Candidate[],
+  dislikedTitles: string[] = [],
 ): Promise<Pick[]> {
+  const avoidBlock = dislikedTitles.length
+    ? `\n\nAVOID LIST — the user has DISLIKED these before; don't pick them and steer away from anything similar:\n${dislikedTitles
+        .map((t) => `- ${t}`)
+        .join("\n")}`
+    : "";
+
   const userContent = `USER MOOD PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nCANDIDATE TITLES (pick from these only):\n${JSON.stringify(
     candidates,
     null,
     2,
-  )}`;
+  )}${avoidBlock}`;
 
   const response = await client().messages.parse({
     model: CURATION_MODEL,

@@ -1,7 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { MediaType } from "./types";
 
-const TABLE = "streammatch_watched";
+const TABLES = {
+  watched: "streammatch_watched",
+  disliked: "streammatch_disliked",
+} as const;
+type ListKind = keyof typeof TABLES;
 
 let _client: SupabaseClient | null = null;
 
@@ -23,41 +27,44 @@ export function isConfigured(): boolean {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
 }
 
+/** "mediaType:tmdbId" key used for set membership / exclusion. */
 export function watchedKey(mediaType: MediaType, tmdbId: number): string {
   return `${mediaType}:${tmdbId}`;
 }
 
-/** All watched titles as a Set of "mediaType:tmdbId" keys. Empty if unconfigured. */
-export async function getWatchedKeys(): Promise<Set<string>> {
-  const c = client();
-  if (!c) return new Set();
-  const { data, error } = await c.from(TABLE).select("tmdb_id, media_type");
-  if (error) {
-    console.error("[supabase] getWatchedKeys:", error.message);
-    return new Set();
-  }
-  return new Set(
-    (data ?? []).map((r) => `${r.media_type}:${r.tmdb_id}` as string),
-  );
-}
-
-export interface WatchedItem {
+export interface ListItem {
   tmdbId: number;
   mediaType: MediaType;
   title: string;
   createdAt: string;
 }
+// Back-compat alias.
+export type WatchedItem = ListItem;
 
-/** Full watched list, newest first. Empty if unconfigured. */
-export async function listWatched(): Promise<WatchedItem[]> {
+// ---------------------------------------------------------------------------
+// Generic core — one implementation, two lists (watched / disliked).
+// ---------------------------------------------------------------------------
+
+async function getKeys(kind: ListKind): Promise<Set<string>> {
+  const c = client();
+  if (!c) return new Set();
+  const { data, error } = await c.from(TABLES[kind]).select("tmdb_id, media_type");
+  if (error) {
+    console.error(`[supabase] getKeys(${kind}):`, error.message);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => `${r.media_type}:${r.tmdb_id}` as string));
+}
+
+async function list(kind: ListKind): Promise<ListItem[]> {
   const c = client();
   if (!c) return [];
   const { data, error } = await c
-    .from(TABLE)
+    .from(TABLES[kind])
     .select("tmdb_id, media_type, title, created_at")
     .order("created_at", { ascending: false });
   if (error) {
-    console.error("[supabase] listWatched:", error.message);
+    console.error(`[supabase] list(${kind}):`, error.message);
     return [];
   }
   return (data ?? []).map((r) => ({
@@ -68,20 +75,8 @@ export async function listWatched(): Promise<WatchedItem[]> {
   }));
 }
 
-/** Remove a title from the watched list (re-enables it for recommendations). */
-export async function unmarkWatched(tmdbId: number, mediaType: MediaType): Promise<void> {
-  const c = client();
-  if (!c) throw new Error("Supabase is not configured");
-  const { error } = await c
-    .from(TABLE)
-    .delete()
-    .eq("tmdb_id", tmdbId)
-    .eq("media_type", mediaType);
-  if (error) throw new Error(error.message);
-}
-
-/** Mark a title watched (idempotent — duplicates are ignored). */
-export async function markWatched(
+async function mark(
+  kind: ListKind,
   tmdbId: number,
   mediaType: MediaType,
   title: string,
@@ -89,10 +84,43 @@ export async function markWatched(
   const c = client();
   if (!c) throw new Error("Supabase is not configured");
   const { error } = await c
-    .from(TABLE)
+    .from(TABLES[kind])
     .upsert(
       { tmdb_id: tmdbId, media_type: mediaType, title },
       { onConflict: "tmdb_id,media_type", ignoreDuplicates: true },
     );
   if (error) throw new Error(error.message);
 }
+
+async function unmark(kind: ListKind, tmdbId: number, mediaType: MediaType): Promise<void> {
+  const c = client();
+  if (!c) throw new Error("Supabase is not configured");
+  const { error } = await c
+    .from(TABLES[kind])
+    .delete()
+    .eq("tmdb_id", tmdbId)
+    .eq("media_type", mediaType);
+  if (error) throw new Error(error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Watched
+// ---------------------------------------------------------------------------
+
+export const getWatchedKeys = () => getKeys("watched");
+export const listWatched = () => list("watched");
+export const markWatched = (tmdbId: number, mediaType: MediaType, title: string) =>
+  mark("watched", tmdbId, mediaType, title);
+export const unmarkWatched = (tmdbId: number, mediaType: MediaType) =>
+  unmark("watched", tmdbId, mediaType);
+
+// ---------------------------------------------------------------------------
+// Disliked
+// ---------------------------------------------------------------------------
+
+export const getDislikedKeys = () => getKeys("disliked");
+export const listDisliked = () => list("disliked");
+export const markDisliked = (tmdbId: number, mediaType: MediaType, title: string) =>
+  mark("disliked", tmdbId, mediaType, title);
+export const unmarkDisliked = (tmdbId: number, mediaType: MediaType) =>
+  unmark("disliked", tmdbId, mediaType);

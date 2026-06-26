@@ -30,7 +30,7 @@ export default function Hero({ onStart }: { onStart: () => void }) {
           href="/watched"
           className="mt-4 inline-block text-sm font-medium text-glow-soft hover:underline"
         >
-          View your watched library →
+          View your library →
         </Link>
       </div>
     </div>

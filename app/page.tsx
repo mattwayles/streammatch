@@ -90,13 +90,13 @@ export default function Home() {
     fetchStep(next);
   }
 
-  async function markWatched(rec: Recommendation) {
+  async function hideAndPost(rec: Recommendation, endpoint: string) {
     // Optimistically hide it from the current results.
     setRecs((prev) =>
       prev.filter((r) => !(r.id === rec.id && r.mediaType === rec.mediaType)),
     );
     try {
-      await fetch("/api/watched", {
+      await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -109,6 +109,9 @@ export default function Home() {
       // Non-fatal: it's hidden locally even if persistence failed.
     }
   }
+
+  const markWatched = (rec: Recommendation) => hideAndPost(rec, "/api/watched");
+  const markDisliked = (rec: Recommendation) => hideAndPost(rec, "/api/disliked");
 
   function reset() {
     setPhase("landing");
@@ -175,7 +178,7 @@ export default function Home() {
             href="/watched"
             className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
           >
-            ✓ Watched library
+            ★ Your library
           </Link>
           <button
             onClick={reset}
@@ -205,6 +208,7 @@ export default function Home() {
               key={`${rec.mediaType}-${rec.id}`}
               rec={rec}
               onWatched={markWatched}
+              onDisliked={markDisliked}
             />
           ))}
         </div>

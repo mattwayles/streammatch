@@ -8,9 +8,11 @@ import ReviewList from "./ReviewList";
 export default function ResultCard({
   rec,
   onWatched,
+  onDisliked,
 }: {
   rec: Recommendation;
   onWatched: (rec: Recommendation) => void;
+  onDisliked: (rec: Recommendation) => void;
 }) {
   const [showReviews, setShowReviews] = useState(false);
   const formatLabel = rec.mediaType === "tv" ? "TV / Series" : "Movie";
@@ -81,13 +83,22 @@ export default function ResultCard({
           >
             {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
           </button>
-          <button
-            onClick={() => onWatched(rec)}
-            title="Mark as watched and hide it from future suggestions"
-            className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
-          >
-            ✓ Seen it — hide
-          </button>
+          <div className="flex shrink-0 gap-2">
+            <button
+              onClick={() => onDisliked(rec)}
+              title="Not for me — hide it and refine future suggestions away from this"
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
+            >
+              👎 Not for me
+            </button>
+            <button
+              onClick={() => onWatched(rec)}
+              title="Mark as watched and hide it from future suggestions"
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
+            >
+              ✓ Seen it
+            </button>
+          </div>
         </div>
         {showReviews && (
           <div>

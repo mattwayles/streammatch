@@ -34,3 +34,34 @@ create policy "streammatch_watched anon delete"
   on public.streammatch_watched
   for delete to anon
   using (true);
+
+-- Disliked titles: hidden from future suggestions AND used as a negative-taste
+-- signal so the curator steers away from similar picks.
+create table if not exists public.streammatch_disliked (
+  id          uuid primary key default gen_random_uuid(),
+  tmdb_id     integer not null,
+  media_type  text not null check (media_type in ('movie', 'tv')),
+  title       text,
+  created_at  timestamptz not null default now(),
+  unique (tmdb_id, media_type)
+);
+
+alter table public.streammatch_disliked enable row level security;
+
+drop policy if exists "streammatch_disliked anon select" on public.streammatch_disliked;
+create policy "streammatch_disliked anon select"
+  on public.streammatch_disliked
+  for select to anon
+  using (true);
+
+drop policy if exists "streammatch_disliked anon insert" on public.streammatch_disliked;
+create policy "streammatch_disliked anon insert"
+  on public.streammatch_disliked
+  for insert to anon
+  with check (true);
+
+drop policy if exists "streammatch_disliked anon delete" on public.streammatch_disliked;
+create policy "streammatch_disliked anon delete"
+  on public.streammatch_disliked
+  for delete to anon
+  using (true);

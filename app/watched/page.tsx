@@ -1,11 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { WatchedItem } from "@/lib/supabase";
+import type { ListItem } from "@/lib/supabase";
 
-export default function WatchedPage() {
-  const [items, setItems] = useState<WatchedItem[]>([]);
+type Kind = "watched" | "disliked";
+
+const ENDPOINT: Record<Kind, string> = {
+  watched: "/api/watched",
+  disliked: "/api/disliked",
+};
+
+function Section({
+  kind,
+  title,
+  subtitle,
+  emptyText,
+}: {
+  kind: Kind;
+  title: string;
+  subtitle: string;
+  emptyText: string;
+}) {
+  const [items, setItems] = useState<ListItem[]>([]);
   const [configured, setConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +31,7 @@ export default function WatchedPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/watched");
+        const res = await fetch(ENDPOINT[kind]);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to load");
         setItems(data.items ?? []);
@@ -25,69 +42,47 @@ export default function WatchedPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [kind]);
 
-  async function reEnable(item: WatchedItem) {
-    const key = `${item.mediaType}:${item.tmdbId}`;
-    setPending(key);
-    const prev = items;
-    setItems((list) =>
-      list.filter((i) => !(i.tmdbId === item.tmdbId && i.mediaType === item.mediaType)),
-    );
-    try {
-      const res = await fetch("/api/watched", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tmdbId: item.tmdbId, mediaType: item.mediaType }),
-      });
-      if (!res.ok) throw new Error();
-    } catch {
-      setItems(prev); // restore on failure
-    } finally {
-      setPending(null);
-    }
-  }
+  const reEnable = useCallback(
+    async (item: ListItem) => {
+      const key = `${item.mediaType}:${item.tmdbId}`;
+      setPending(key);
+      const prev = items;
+      setItems((list) =>
+        list.filter((i) => !(i.tmdbId === item.tmdbId && i.mediaType === item.mediaType)),
+      );
+      try {
+        const res = await fetch(ENDPOINT[kind], {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbId: item.tmdbId, mediaType: item.mediaType }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setItems(prev);
+      } finally {
+        setPending(null);
+      }
+    },
+    [items, kind],
+  );
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="mb-2 text-sm font-medium uppercase tracking-[0.25em] text-glow-soft">
-            Your memory
-          </p>
-          <h1 className="font-display text-4xl font-bold text-glow sm:text-5xl">
-            Watched library
-          </h1>
-          <p className="mt-2 text-sm text-white/60">
-            These are hidden from suggestions. Re-enable any to let it come back.
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
-        >
-          ← Back
-        </Link>
-      </div>
+    <section className="mb-12">
+      <h2 className="font-display text-2xl font-semibold text-white">{title}</h2>
+      <p className="mb-4 mt-1 text-sm text-white/50">{subtitle}</p>
 
       {loading ? (
-        <p className="animate-pulse-glow text-white/50">Loading…</p>
+        <p className="animate-pulse-glow text-white/40">Loading…</p>
       ) : error ? (
-        <div className="glass rounded-3xl p-8 text-center text-white/70">{error}</div>
+        <div className="glass rounded-2xl p-6 text-center text-white/70">{error}</div>
       ) : !configured ? (
-        <div className="glass rounded-3xl p-8 text-center text-white/70">
-          The watched memory isn&apos;t configured (Supabase keys missing).
+        <div className="glass rounded-2xl p-6 text-center text-white/70">
+          Not configured (Supabase keys missing).
         </div>
       ) : items.length === 0 ? (
-        <div className="glass rounded-3xl p-10 text-center">
-          <p className="text-white/70">Nothing marked watched yet.</p>
-          <Link
-            href="/"
-            className="btn-glow mt-6 inline-block rounded-full px-8 py-3 text-sm font-semibold"
-          >
-            Find something to watch →
-          </Link>
-        </div>
+        <div className="glass rounded-2xl p-8 text-center text-white/60">{emptyText}</div>
       ) : (
         <ul className="flex flex-col gap-3">
           {items.map((item) => {
@@ -107,7 +102,7 @@ export default function WatchedPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-white/40">
-                    Marked {new Date(item.createdAt).toLocaleDateString()}
+                    {new Date(item.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 <button
@@ -122,6 +117,45 @@ export default function WatchedPage() {
           })}
         </ul>
       )}
+    </section>
+  );
+}
+
+export default function LibraryPage() {
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-16">
+      <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="mb-2 text-sm font-medium uppercase tracking-[0.25em] text-glow-soft">
+            Your memory
+          </p>
+          <h1 className="font-display text-4xl font-bold text-glow sm:text-5xl">
+            Your library
+          </h1>
+          <p className="mt-2 text-sm text-white/60">
+            Hidden from suggestions. Re-enable anything to bring it back.
+          </p>
+        </div>
+        <Link
+          href="/"
+          className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
+        >
+          ← Back
+        </Link>
+      </div>
+
+      <Section
+        kind="watched"
+        title="✓ Watched"
+        subtitle="Titles you've marked as seen."
+        emptyText="Nothing marked watched yet."
+      />
+      <Section
+        kind="disliked"
+        title="👎 Disliked"
+        subtitle="Titles you've passed on — future suggestions steer away from these and anything similar."
+        emptyText="Nothing disliked yet."
+      />
     </main>
   );
 }
