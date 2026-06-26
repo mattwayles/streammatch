@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { Question } from "@/lib/types";
 import OptionButton from "./OptionButton";
 import RichText from "./RichText";
+import RotatingMessage from "./RotatingMessage";
+import { INTERVIEW_PHRASES } from "@/lib/phrases";
 
 /** Strip a stray enumerator prefix like "(A) ", "A) ", "A. ", "1) " from a label. */
 function clean(s: string): string {
@@ -102,8 +104,8 @@ export default function QuestionCard({
       </div>
 
       {busy && (
-        <p className="mt-6 animate-pulse-glow text-center text-sm text-white/50">
-          Thinking about what to ask next…
+        <p className="mt-6 text-center text-sm text-white/50">
+          <RotatingMessage messages={INTERVIEW_PHRASES} className="animate-pulse-glow" />
         </p>
       )}
     </div>

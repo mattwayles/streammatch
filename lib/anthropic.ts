@@ -78,10 +78,11 @@ INTERVIEW RULES:
   Reality / trash TV — gloriously dumb, chaotic, addictive
   Short-ass movie — a contained ~90-minute story, then you're out
   Gripping, no-phones-allowed cinema — edge-of-your-seat, fully committed
-  Any / I don't know
+  I don't care, you pick something
 - After that, ask 2–3 follow-ups TAILORED to their prior answers. Good angles: tone/humor style, micro-genre/aesthetic, mood texture, era/freshness. Design options that make sense for the chosen format — do not reuse generic options every time.
-- Follow-up questions have 3–5 options. On EVERY question (including the first), the LAST option is always "Any / I don't know".
-- Treat any "Any / I don't know" answer as a signal to widen the net. NEVER re-ask something already answered with "Any".
+- The first question's LAST option is exactly "I don't care, you pick something". Follow-up questions have 3–5 options and their LAST option is always "Any / I don't know".
+- SHORT-CIRCUIT: if the user answers the FIRST question with "I don't care, you pick something", do NOT ask any further questions. Immediately return kind="complete" with an open, crowd-pleasing profile: mediaType "both", genreNames [], keywords [], era "any", toneDescriptors ["crowd-pleasing", "buzzy"], and a summary saying they want your best pick from the hottest, most-loved things streaming right now.
+- Treat any "Any / I don't know" answer (on follow-up questions) as a signal to widen the net. NEVER re-ask something already answered with "Any".
 - The user may also answer with their OWN free-text response instead of picking an option (an "Other" choice). When an answer doesn't match any option you offered, treat it as their genuine, specific preference, take it seriously, and adapt the next question (and the final profile) around it.
 - FORMATTING: write question text and option labels as clean prose. To emphasize a word or two, use **double-asterisk bold** only — the UI renders it. Never wrap words in single asterisks, and use no other markdown (no headings, lists, or backticks).
 - Do NOT ask about streaming subscriptions — assume the user has access to every major platform.

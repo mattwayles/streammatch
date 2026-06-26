@@ -6,6 +6,8 @@ import Hero from "@/components/Hero";
 import QuestionCard from "@/components/QuestionCard";
 import Loader from "@/components/Loader";
 import ResultCard from "@/components/ResultCard";
+import RotatingMessage from "@/components/RotatingMessage";
+import { INTERVIEW_PHRASES } from "@/lib/phrases";
 import type {
   InterviewStep,
   InterviewTurn,
@@ -136,9 +138,10 @@ export default function Home() {
     if (!question) {
       return (
         <div className="flex min-h-screen items-center justify-center">
-          <p className="animate-pulse-glow font-display text-2xl text-glow">
-            Warming up…
-          </p>
+          <RotatingMessage
+            messages={INTERVIEW_PHRASES}
+            className="animate-pulse-glow font-display text-2xl text-glow"
+          />
         </div>
       );
     }
