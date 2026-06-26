@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+}
+
+@layer base {
+  html,
+  body {
+    @apply bg-ink-950 text-white antialiased;
+  }
+
+  body {
+    min-height: 100vh;
+    background-image:
+      radial-gradient(60% 50% at 20% 0%, rgba(124, 92, 255, 0.16), transparent 70%),
+      radial-gradient(50% 50% at 90% 10%, rgba(255, 122, 89, 0.1), transparent 70%);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.04] border border-white/10 backdrop-blur-xl;
+  }
+
+  .glass-hover {
+    @apply transition-all duration-200 hover:bg-white/[0.08] hover:border-white/20;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 28px rgba(124, 92, 255, 0.45);
+  }
+
+  .btn-glow {
+    @apply bg-glow text-white shadow-glow transition-transform duration-150
+      hover:scale-[1.02] active:scale-[0.98];
+  }
+}
+
+/* Custom scrollbar for review panels */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
