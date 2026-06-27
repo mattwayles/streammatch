@@ -17,7 +17,7 @@
   body {
     min-height: 100vh;
     background-image:
-      radial-gradient(60% 50% at 20% 0%, rgba(124, 92, 255, 0.16), transparent 70%),
+      radial-gradient(60% 50% at 20% 0%, rgba(14, 165, 233, 0.16), transparent 70%),
       radial-gradient(50% 50% at 90% 10%, rgba(255, 122, 89, 0.1), transparent 70%);
     background-attachment: fixed;
   }
@@ -33,7 +33,7 @@
   }
 
   .text-glow {
-    text-shadow: 0 0 28px rgba(124, 92, 255, 0.45);
+    text-shadow: 0 0 28px rgba(14, 165, 233, 0.45);
   }
 
   .btn-glow {

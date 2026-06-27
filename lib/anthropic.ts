@@ -38,6 +38,7 @@ const MoodProfileSchema = z.object({
   era: z.enum(["new", "classic", "any"]),
   toneDescriptors: z.array(z.string()),
   summary: z.string(),
+  watchlistMode: z.boolean().optional(),
 });
 
 const InterviewSchema = z.object({
@@ -78,10 +79,12 @@ INTERVIEW RULES:
   Reality / trash TV — gloriously dumb, chaotic, addictive
   Short-ass movie — a contained ~90-minute story, then you're out
   Gripping, no-phones-allowed cinema — edge-of-your-seat, fully committed
+  Something from my watch list — pick from titles I've saved to watch later
   I don't care, you pick something
 - After that, ask 2–3 follow-ups TAILORED to their prior answers. Good angles: tone/humor style, micro-genre/aesthetic, mood texture, era/freshness. Design options that make sense for the chosen format — do not reuse generic options every time.
 - The first question's LAST option is exactly "I don't care, you pick something". Follow-up questions have 3–5 options and their LAST option is always "Any / I don't know".
-- SHORT-CIRCUIT: if the user answers the FIRST question with "I don't care, you pick something", do NOT ask any further questions. Immediately return kind="complete" with an open, crowd-pleasing profile: mediaType "both", genreNames [], keywords [], era "any", toneDescriptors ["crowd-pleasing", "buzzy"], and a summary saying they want your best pick from the hottest, most-loved things streaming right now.
+- SHORT-CIRCUIT: if the user answers the FIRST question with "I don't care, you pick something", do NOT ask any further questions. Immediately return kind="complete" with an open, crowd-pleasing profile: mediaType "both", genreNames [], keywords [], era "any", toneDescriptors ["crowd-pleasing", "buzzy"], watchlistMode false, and a summary saying they want your best pick from the hottest, most-loved things streaming right now.
+- WATCHLIST SHORT-CIRCUIT: if the user answers the FIRST question with "Something from my watch list", do NOT ask any further questions. Immediately return kind="complete" with: watchlistMode true, mediaType "both", genreNames [], keywords [], era "any", toneDescriptors [], and a summary saying they want to watch something from their saved watchlist tonight.
 - Treat any "Any / I don't know" answer (on follow-up questions) as a signal to widen the net. NEVER re-ask something already answered with "Any".
 - The user may also answer with their OWN free-text response instead of picking an option (an "Other" choice). When an answer doesn't match any option you offered, treat it as their genuine, specific preference, take it seriously, and adapt the next question (and the final profile) around it.
 - FORMATTING: write question text and option labels as clean prose. To emphasize a word or two, use **double-asterisk bold** only — the UI renders it. Never wrap words in single asterisks, and use no other markdown (no headings, lists, or backticks).
@@ -91,7 +94,7 @@ INTERVIEW RULES:
 OUTPUT (structured object):
 - While interviewing: kind="question", fill "question" (text + options), set "profile" to null. Each option "label" is plain choice text with NO letter or number prefix — write "Dry & sarcastic", never "(A) Dry & sarcastic". The "value" should match the label.
 - When done: kind="complete", set "question" to null, and fill "profile":
-  - mediaType: "movie" for "short-ass movie" or "gripping cinema"; "tv" for "mindless sitcom", "binge-worthy TV", or "reality / trash TV"; "both" for "murder / true crime" (it spans documentaries, series, and films) or if they stayed open.
+  - mediaType: "movie" for "short-ass movie" or "gripping cinema"; "tv" for "mindless sitcom", "binge-worthy TV", or "reality / trash TV"; "both" for "murder / true crime" (it spans documentaries, series, and films), "something from my watch list", or if they stayed open.
   - genreNames: standard genre names only, drawn from: Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western, Reality. Map the format choice sensibly — e.g. murder/true crime → Crime, Mystery, Documentary, Thriller; reality/trash TV → Reality; mindless sitcom → Comedy.
   - keywords: include format-specific cues where relevant, e.g. "true crime" / "murder" / "investigation" for crime, "reality competition" / "dating show" for reality TV.
   - era: "new" (recent/buzzy), "classic" (older beloved), or "any".
@@ -105,9 +108,10 @@ const CURATION_SYSTEM_PROMPT = `You are "StreamMatch," an elite entertainment co
 You will receive (1) the user's mood profile and (2) a list of REAL candidate titles pulled from a live catalog database. Select the titles that best match how the user feels RIGHT NOW.
 
 RULES:
-- Choose up to 6 titles (fewer if the pool is small). The candidates are all currently streaming. Favor the FRESHEST, most-buzzed options: lean toward this year and last year (check "year") and higher "popularity". Surface genuine current standouts and a hidden gem or two — actively AVOID defaulting to the most obvious, generic, evergreen mainstream titles unless one truly nails the mood.
-- Aim for a non-boilerplate mix the user likely hasn't already had recommended a hundred times.
+- Choose up to 20 titles (fewer if the pool is small). The candidates are all currently streaming. Favor the FRESHEST, most-buzzed options: lean toward this year and last year (check "year") and higher "popularity". Surface genuine current standouts and hidden gems — actively AVOID defaulting to the most obvious, generic, evergreen mainstream titles unless one truly nails the mood.
+- RANK your picks from best match to weakest match. The first pick should be your strongest, most confident recommendation for this exact mood; the last pick is a decent-but-not-perfect stretch. The user sees them in this order.
 - ONLY pick from the provided candidates. Use each candidate's exact numeric "id" and its "mediaType" — never invent titles or ids.
+- If a LIKED LIST of previously enjoyed titles is provided, treat it as a strong positive-taste signal: prioritize candidates that are similar in genre, tone, theme, or franchise to those titles. The user's taste is anchored by what they've loved.
 - If an AVOID LIST of previously disliked titles is provided, treat it as a strong negative-taste signal: never pick those titles, and steer away from candidates that are similar in genre, tone, premise, or franchise.
 - If the user's answers were open-ended ("Any"), cast a wider net across the candidates for variety.
 - For each pick write:
@@ -175,7 +179,14 @@ export async function selectRecommendations(
   profile: MoodProfile,
   candidates: Candidate[],
   dislikedTitles: string[] = [],
+  likedTitles: string[] = [],
 ): Promise<Pick[]> {
+  const likedBlock = likedTitles.length
+    ? `\n\nLIKED LIST — the user has LOVED these before; prioritize candidates with similar genre, tone, and themes:\n${likedTitles
+        .map((t) => `- ${t}`)
+        .join("\n")}`
+    : "";
+
   const avoidBlock = dislikedTitles.length
     ? `\n\nAVOID LIST — the user has DISLIKED these before; don't pick them and steer away from anything similar:\n${dislikedTitles
         .map((t) => `- ${t}`)
@@ -186,7 +197,7 @@ export async function selectRecommendations(
     candidates,
     null,
     2,
-  )}${avoidBlock}`;
+  )}${likedBlock}${avoidBlock}`;
 
   const response = await client().messages.parse({
     model: CURATION_MODEL,

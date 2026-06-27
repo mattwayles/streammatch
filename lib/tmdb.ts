@@ -207,7 +207,7 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
 
   const addRaw = (list: RawTitle[]) => {
     for (const t of list) {
-      if (candidates.length >= 50) return;
+      if (candidates.length >= 100) return;
       const mediaType = (t.media_type as MediaType) || "movie";
       if (!types.includes(mediaType)) continue;
       const key = `${mediaType}:${t.id}`;
@@ -296,6 +296,54 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
     }
   }
 
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Watchlist candidate pool — build Candidates from saved TMDB ids
+// ---------------------------------------------------------------------------
+
+interface BasicDetailsResponse {
+  id: number;
+  title?: string;
+  name?: string;
+  overview?: string;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  popularity?: number;
+  genres?: { id: number; name: string }[];
+}
+
+/**
+ * Fetch lightweight TMDB details for a list of known ids and return them as
+ * Candidates. Used when the user picks "Something from my watch list."
+ */
+export async function buildCandidatesFromIds(
+  items: Array<{ id: number; mediaType: MediaType }>,
+): Promise<Candidate[]> {
+  const results = await Promise.allSettled(
+    items.map(({ id, mediaType }) => tmdb<BasicDetailsResponse>(`/${mediaType}/${id}`)),
+  );
+
+  const candidates: Candidate[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === "rejected") continue;
+    const d = result.value;
+    const { mediaType } = items[i];
+    if (!d.overview) continue;
+    candidates.push({
+      id: d.id,
+      mediaType,
+      title: d.title || d.name || "Untitled",
+      year: (d.release_date || d.first_air_date || "").slice(0, 4) || null,
+      overview: d.overview.slice(0, 400),
+      genres: (d.genres ?? []).map((g) => g.name),
+      rating: Math.round((d.vote_average ?? 0) * 10) / 10,
+      popularity: Math.round(d.popularity ?? 0),
+    });
+  }
   return candidates;
 }
 

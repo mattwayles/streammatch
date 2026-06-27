@@ -4,6 +4,8 @@ import type { MediaType } from "./types";
 const TABLES = {
   watched: "streammatch_watched",
   disliked: "streammatch_disliked",
+  watchlist: "streammatch_watchlist",
+  liked: "streammatch_liked",
 } as const;
 type ListKind = keyof typeof TABLES;
 
@@ -124,3 +126,25 @@ export const markDisliked = (tmdbId: number, mediaType: MediaType, title: string
   mark("disliked", tmdbId, mediaType, title);
 export const unmarkDisliked = (tmdbId: number, mediaType: MediaType) =>
   unmark("disliked", tmdbId, mediaType);
+
+// ---------------------------------------------------------------------------
+// Watchlist
+// ---------------------------------------------------------------------------
+
+export const getWatchlistKeys = () => getKeys("watchlist");
+export const listWatchlist = () => list("watchlist");
+export const markWatchlist = (tmdbId: number, mediaType: MediaType, title: string) =>
+  mark("watchlist", tmdbId, mediaType, title);
+export const unmarkWatchlist = (tmdbId: number, mediaType: MediaType) =>
+  unmark("watchlist", tmdbId, mediaType);
+
+// ---------------------------------------------------------------------------
+// Liked
+// ---------------------------------------------------------------------------
+
+export const getLikedKeys = () => getKeys("liked");
+export const listLiked = () => list("liked");
+export const markLiked = (tmdbId: number, mediaType: MediaType, title: string) =>
+  mark("liked", tmdbId, mediaType, title);
+export const unmarkLiked = (tmdbId: number, mediaType: MediaType) =>
+  unmark("liked", tmdbId, mediaType);

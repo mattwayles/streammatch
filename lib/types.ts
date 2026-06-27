@@ -31,6 +31,8 @@ export interface MoodProfile {
   toneDescriptors: string[];
   /** One- or two-sentence natural-language summary of what they want tonight. */
   summary: string;
+  /** When true, build the candidate pool from the user's saved watchlist instead of TMDB discover. */
+  watchlistMode?: boolean;
 }
 
 /** A turn in the conversation, sent from the client to `/api/interview`. */

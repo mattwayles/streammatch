@@ -15,8 +15,8 @@ const config: Config = {
           700: "#1a1e2e",
         },
         glow: {
-          DEFAULT: "#7c5cff",
-          soft: "#a48bff",
+          DEFAULT: "#0ea5e9",
+          soft: "#93c5fd",
           warm: "#ff7a59",
         },
       },
@@ -25,7 +25,7 @@ const config: Config = {
         display: ["var(--font-display)", "Georgia", "serif"],
       },
       boxShadow: {
-        glow: "0 0 40px -8px rgba(124, 92, 255, 0.55)",
+        glow: "0 0 40px -8px rgba(14, 165, 233, 0.55)",
         card: "0 20px 60px -20px rgba(0, 0, 0, 0.8)",
       },
       keyframes: {

@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { selectRecommendations } from "@/lib/anthropic";
-import { buildCandidatePool, enrich } from "@/lib/tmdb";
-import { getDislikedKeys, getWatchedKeys, listDisliked, watchedKey } from "@/lib/supabase";
+import { buildCandidatePool, buildCandidatesFromIds, enrich } from "@/lib/tmdb";
+import {
+  getDislikedKeys,
+  getLikedKeys,
+  getWatchedKeys,
+  listDisliked,
+  listLiked,
+  listWatchlist,
+  watchedKey,
+} from "@/lib/supabase";
 import type { MoodProfile, Recommendation } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -15,30 +23,51 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing mood profile" }, { status: 400 });
     }
 
-    const allCandidates = await buildCandidatePool(profile);
+    let allCandidates;
+    if (profile.watchlistMode) {
+      // Build candidate pool from the user's saved watchlist instead of TMDB discover.
+      const watchlistItems = await listWatchlist();
+      if (watchlistItems.length === 0) {
+        return NextResponse.json({ recommendations: [], watchlistEmpty: true });
+      }
+      allCandidates = await buildCandidatesFromIds(
+        watchlistItems.map((item) => ({ id: item.tmdbId, mediaType: item.mediaType })),
+      );
+    } else {
+      allCandidates = await buildCandidatePool(profile);
+    }
 
-    // Hide anything already watched or disliked (single shared lists).
-    const [watched, disliked, dislikedList] = await Promise.all([
+    // Filter out watched, liked (already seen), and disliked titles.
+    const [watched, disliked, liked, dislikedList, likedList] = await Promise.all([
       getWatchedKeys(),
       getDislikedKeys(),
+      getLikedKeys(),
       listDisliked(),
+      listLiked(),
     ]);
+
     const candidates = allCandidates.filter((c) => {
       const k = watchedKey(c.mediaType, c.id);
-      return !watched.has(k) && !disliked.has(k);
+      // In watchlist mode keep items regardless of watched status — user explicitly saved them.
+      if (profile.watchlistMode) return !disliked.has(k);
+      return !watched.has(k) && !disliked.has(k) && !liked.has(k);
     });
 
     if (candidates.length === 0) {
       return NextResponse.json({ recommendations: [] });
     }
 
-    // Feed disliked titles to the curator as a negative-taste signal.
     const dislikedTitles = dislikedList
       .map((d) => d.title)
       .filter(Boolean)
       .slice(0, 30);
 
-    const picks = await selectRecommendations(profile, candidates, dislikedTitles);
+    const likedTitles = likedList
+      .map((l) => l.title)
+      .filter(Boolean)
+      .slice(0, 30);
+
+    const picks = await selectRecommendations(profile, candidates, dislikedTitles, likedTitles);
 
     // Drop any pick the model invented that isn't in the real pool.
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));

@@ -60,10 +60,15 @@ export default function Home() {
         body: JSON.stringify({ profile }),
       });
       const data = (await res.json()) as
-        | { recommendations: Recommendation[] }
+        | { recommendations: Recommendation[]; watchlistEmpty?: boolean }
         | { error: string };
       if (!res.ok || "error" in data) {
         throw new Error("error" in data ? data.error : "Recommendation request failed");
+      }
+      if ("watchlistEmpty" in data && data.watchlistEmpty) {
+        throw new Error(
+          "Your watch list is empty. Add titles with the 🔖 Watch Later button first.",
+        );
       }
       setRecs(data.recommendations);
       setPhase("results");
@@ -112,6 +117,19 @@ export default function Home() {
 
   const markWatched = (rec: Recommendation) => hideAndPost(rec, "/api/watched");
   const markDisliked = (rec: Recommendation) => hideAndPost(rec, "/api/disliked");
+  const markLiked = (rec: Recommendation) => hideAndPost(rec, "/api/liked");
+
+  async function addToWatchlist(rec: Recommendation) {
+    try {
+      await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmdbId: rec.id, mediaType: rec.mediaType, title: rec.title }),
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
 
   function reset() {
     setPhase("landing");
@@ -209,6 +227,8 @@ export default function Home() {
               rec={rec}
               onWatched={markWatched}
               onDisliked={markDisliked}
+              onLiked={markLiked}
+              onWatchlist={addToWatchlist}
             />
           ))}
         </div>

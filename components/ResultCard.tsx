@@ -9,12 +9,17 @@ export default function ResultCard({
   rec,
   onWatched,
   onDisliked,
+  onLiked,
+  onWatchlist,
 }: {
   rec: Recommendation;
   onWatched: (rec: Recommendation) => void;
   onDisliked: (rec: Recommendation) => void;
+  onLiked: (rec: Recommendation) => void;
+  onWatchlist: (rec: Recommendation) => void;
 }) {
   const [showReviews, setShowReviews] = useState(false);
+  const [savedToWatchlist, setSavedToWatchlist] = useState(false);
   const formatLabel = rec.mediaType === "tv" ? "TV / Series" : "Movie";
 
   return (
@@ -76,20 +81,33 @@ export default function ResultCard({
 
         <p className="text-sm leading-relaxed text-white/55">{rec.description}</p>
 
-        <div className="flex items-center justify-between gap-3">
-          <button
-            onClick={() => setShowReviews((s) => !s)}
-            className="text-sm font-medium text-glow-soft hover:underline"
-          >
-            {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
-          </button>
-          <div className="flex shrink-0 gap-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
             <button
-              onClick={() => onDisliked(rec)}
-              title="Not for me — hide it and refine future suggestions away from this"
+              onClick={() => setShowReviews((s) => !s)}
+              className="text-sm font-medium text-glow-soft hover:underline"
+            >
+              {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
+            </button>
+            <button
+              onClick={() => {
+                setSavedToWatchlist(true);
+                onWatchlist(rec);
+              }}
+              disabled={savedToWatchlist}
+              title="Save to your watch list for later"
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
+            >
+              {savedToWatchlist ? "🔖 Saved" : "🔖 Watch Later"}
+            </button>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => onLiked(rec)}
+              title="Watched it and loved it — refine future suggestions toward more like this"
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
             >
-              👎 Not for me
+              👍 Liked it
             </button>
             <button
               onClick={() => onWatched(rec)}
@@ -97,6 +115,13 @@ export default function ResultCard({
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
             >
               ✓ Seen it
+            </button>
+            <button
+              onClick={() => onDisliked(rec)}
+              title="Not for me — hide it and refine future suggestions away from this"
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
+            >
+              👎 Not for me
             </button>
           </div>
         </div>

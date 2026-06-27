@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { ListItem } from "@/lib/supabase";
 
-type Kind = "watched" | "disliked";
+type Kind = "watched" | "disliked" | "watchlist" | "liked";
 
 const ENDPOINT: Record<Kind, string> = {
   watched: "/api/watched",
   disliked: "/api/disliked",
+  watchlist: "/api/watchlist",
+  liked: "/api/liked",
 };
 
 function Section({
@@ -16,11 +18,13 @@ function Section({
   title,
   subtitle,
   emptyText,
+  removeLabel = "↺ Re-enable",
 }: {
   kind: Kind;
   title: string;
   subtitle: string;
   emptyText: string;
+  removeLabel?: string;
 }) {
   const [items, setItems] = useState<ListItem[]>([]);
   const [configured, setConfigured] = useState(true);
@@ -110,7 +114,7 @@ function Section({
                   disabled={pending === key}
                   className="glass glass-hover shrink-0 rounded-full px-4 py-2 text-xs font-semibold text-glow-soft disabled:opacity-40"
                 >
-                  ↺ Re-enable
+                  {removeLabel}
                 </button>
               </li>
             );
@@ -144,6 +148,19 @@ export default function LibraryPage() {
         </Link>
       </div>
 
+      <Section
+        kind="watchlist"
+        title="🔖 Watch List"
+        subtitle="Titles you've saved to watch later. Pick 'Something from my watch list' at the start to surface these."
+        emptyText="Nothing saved to your watch list yet."
+        removeLabel="✕ Remove"
+      />
+      <Section
+        kind="liked"
+        title="👍 Liked"
+        subtitle="Titles you've watched and loved — used as a positive taste signal to refine future recommendations."
+        emptyText="Nothing liked yet."
+      />
       <Section
         kind="watched"
         title="✓ Watched"
