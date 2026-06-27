@@ -12,6 +12,13 @@ function clean(s: string): string {
   return s.replace(/^\s*(?:\([A-Za-z0-9]\)|[A-Za-z0-9][.)])\s*/, "").trim();
 }
 
+/** Split "Primary — secondary descriptor" into its two parts. */
+function splitLabel(s: string): { primary: string; secondary: string | null } {
+  const idx = s.indexOf(" — ");
+  if (idx === -1) return { primary: s, secondary: null };
+  return { primary: s.slice(0, idx), secondary: s.slice(idx + 3) };
+}
+
 export default function QuestionCard({
   question,
   questionNumber,
@@ -42,14 +49,26 @@ export default function QuestionCard({
       </h2>
 
       <div className="flex flex-col gap-3">
-        {question.options.map((opt, i) => (
-          <OptionButton
-            key={`${questionNumber}-${i}`}
-            label={<RichText text={clean(opt.label)} />}
-            disabled={busy || otherMode}
-            onClick={() => onAnswer(clean(opt.value))}
-          />
-        ))}
+        {question.options.map((opt, i) => {
+          const { primary, secondary } = splitLabel(clean(opt.label));
+          return (
+            <OptionButton
+              key={`${questionNumber}-${i}`}
+              label={
+                secondary ? (
+                  <span className="flex flex-col gap-1">
+                    <span><RichText text={primary} /></span>
+                    <span className="text-sm font-normal italic text-white/50">{secondary}</span>
+                  </span>
+                ) : (
+                  <RichText text={primary} />
+                )
+              }
+              disabled={busy || otherMode}
+              onClick={() => onAnswer(clean(opt.value))}
+            />
+          );
+        })}
 
         {/* "Other" free-text option — the typed answer is sent to the model. */}
         {!otherMode ? (
