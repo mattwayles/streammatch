@@ -48,14 +48,14 @@ export async function POST(req: Request) {
           body.watchedTitles ?? [],
           body.watchlistTitles ?? [],
         ),
-        50000,
+        52000,
         "selectRecommendations (Anthropic)",
       );
     } catch (err) {
       console.error("[/api/recommend] LLM selection failed, falling back to popularity:", err);
       picks = [...candidates]
         .sort((a, b) => b.popularity - a.popularity)
-        .slice(0, 15)
+        .slice(0, 60)
         .map((c) => ({
           id: c.id,
           mediaType: c.mediaType,

@@ -174,24 +174,32 @@ interface StrandOpts {
   sortBy: string;
   voteCountGte: number;
   window: Record<string, string>;
+  /** How many TMDB pages (20 results each) to pull in parallel. Defaults to 1. */
+  pages?: number;
 }
 
 /** One discover query, restricted to titles currently available on streaming (flatrate). */
 async function discoverStrand(type: MediaType, opts: StrandOpts): Promise<RawTitle[]> {
-  const data = await tmdb<{ results: RawTitle[] }>(`/discover/${type}`, {
-    sort_by: opts.sortBy,
-    include_adult: "false",
-    watch_region: region(),
-    with_watch_monetization_types: "flatrate", // only what's streamable right now
-    "vote_count.gte": opts.voteCountGte,
-    // OR across genres (pipe) so the pool stays broad and relevant, not over-narrowed.
-    with_genres: opts.genreIds.length ? opts.genreIds.join("|") : undefined,
-    // OR across keywords — titles must match genre AND at least one keyword, which
-    // filters out genre-adjacent noise (e.g. crime dramas when intent is true-crime docs).
-    with_keywords: opts.keywordIds?.length ? opts.keywordIds.join("|") : undefined,
-    ...opts.window,
-  });
-  return data.results.map((r) => ({ ...r, media_type: type }));
+  const pages = Math.max(1, opts.pages ?? 1);
+  const pageResults = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      tmdb<{ results: RawTitle[] }>(`/discover/${type}`, {
+        sort_by: opts.sortBy,
+        include_adult: "false",
+        watch_region: region(),
+        with_watch_monetization_types: "flatrate", // only what's streamable right now
+        "vote_count.gte": opts.voteCountGte,
+        // OR across genres (pipe) so the pool stays broad and relevant, not over-narrowed.
+        with_genres: opts.genreIds.length ? opts.genreIds.join("|") : undefined,
+        // OR across keywords — titles must match genre AND at least one keyword, which
+        // filters out genre-adjacent noise (e.g. crime dramas when intent is true-crime docs).
+        with_keywords: opts.keywordIds?.length ? opts.keywordIds.join("|") : undefined,
+        page: i + 1,
+        ...opts.window,
+      }),
+    ),
+  );
+  return pageResults.flatMap((d) => d.results).map((r) => ({ ...r, media_type: type }));
 }
 
 /**
@@ -226,7 +234,7 @@ async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candida
 
   const addRaw = (list: RawTitle[]) => {
     for (const t of list) {
-      if (candidates.length >= 60) return;
+      if (candidates.length >= 120) return;
       const mediaType = (t.media_type as MediaType) || "movie";
       if (!types.includes(mediaType)) continue;
       const key = `${mediaType}:${t.id}`;
@@ -272,6 +280,7 @@ async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candida
           sortBy: "popularity.desc",
           voteCountGte: 10,
           window: eraWindow(type, profile.era, 48),
+          pages: 2,
         });
       }),
     );
@@ -289,6 +298,7 @@ async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candida
         sortBy: "popularity.desc",
         voteCountGte: 50,
         window: eraWindow(type, profile.era, 24),
+        pages: 4,
       });
     }),
   );

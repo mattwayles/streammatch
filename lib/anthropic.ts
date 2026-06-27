@@ -108,8 +108,8 @@ const CURATION_SYSTEM_PROMPT = `You are "StreamMatch," an elite entertainment co
 You will receive (1) the user's mood profile and (2) a list of REAL candidate titles pulled from a live catalog database. Select the titles that best match how the user feels RIGHT NOW.
 
 RULES:
-- TARGET 15–20 picks. Push for this range to give the user a rich, curated selection. Only go below 10 if the pool is genuinely tiny (under 15 candidates). The candidates are all currently streaming. Favor the FRESHEST, most-buzzed options: lean toward this year and last year (check "year") and higher "popularity". Surface genuine current standouts and hidden gems — actively AVOID defaulting to the most obvious, generic, evergreen mainstream titles unless one truly nails the mood.
-- RANK your picks from best match to weakest match. The first pick should be your strongest, most confident recommendation for this exact mood; the last pick is a decent-but-not-perfect stretch. The user sees them in this order.
+- RETURN EVERY CANDIDATE THAT GENUINELY MATCHES THE MOOD — there is NO upper limit and NO target count. Do NOT narrow down to a "best 15-20" shortlist. If 60, 80, or 100 of the candidates fit, return all of them. The only titles you should leave out are ones that clearly do NOT fit the user's mood/answers (or that appear on the AVOID/WATCHED/WATCHLIST lists below). When in doubt about a title, INCLUDE it. The candidates are all currently streaming.
+- RANK your picks from best match to weakest match. The first pick should be your strongest, most confident recommendation for this exact mood; later picks are progressively looser-but-still-valid fits. The user sees them in this order, so lead with the freshest, most-buzzed standouts (recent "year", higher "popularity") and let the long tail follow.
 - ONLY pick from the provided candidates. Use each candidate's exact numeric "id" and its "mediaType" — never invent titles or ids.
 - If a LIKED LIST of previously enjoyed titles is provided, treat it as a strong positive-taste signal: prioritize candidates that are similar in genre, tone, theme, or franchise to those titles. The user's taste is anchored by what they've loved.
 - If an AVOID LIST of previously disliked titles is provided, treat it as a strong negative-taste signal: never pick those titles, and steer away from candidates that are similar in genre, tone, premise, or franchise.
@@ -117,7 +117,7 @@ RULES:
 - If a WATCHLIST is provided (titles the user has saved to watch later), never recommend them — they're explicitly queued up already.
 - If the user's answers were open-ended ("Any"), cast a wider net across the candidates for variety and breadth.
 - For each pick write:
-  - whyThisFits: 1–2 sharp, specific sentences tying the title directly to the user's mood/answers.
+  - whyThisFits: ONE sharp, specific sentence tying the title directly to the user's mood/answers. Keep it tight — you may be writing many of these.
   - vibeCheck: a short tag or content warning, e.g. "High-anxiety pacing", "Heartwarming comfort", "Gory but funny", "Cozy background noise".
 
 Tone: engaging, sharp, deeply intuitive. Return only the structured object.`;
@@ -215,20 +215,23 @@ export interface Candidate {
 }
 
 async function parseSelections(userContent: string): Promise<Pick[]> {
-  // Stream the request: this is a large-input, thinking-enabled call, and a
-  // non-streaming request risks hitting the SDK/platform HTTP timeout before it
-  // returns. `effort: "medium"` keeps thinking-token latency in budget — this is
-  // a "pick from a list" task, not one that needs maximum reasoning depth.
+  // Stream the request: this returns a large list (potentially 60-100 picks),
+  // and a non-streaming request would risk the SDK/platform HTTP timeout before
+  // it returns. This is a "select everything that fits from a list" task, so we
+  // disable extended thinking and run at low effort — the dominant cost is the
+  // output tokens for all those picks, not reasoning depth, and skipping
+  // thinking keeps the call inside the upstream time budget. `max_tokens` is
+  // large so a long result list isn't truncated mid-stream.
   // No in-process retry: the request is bounded by a hard deadline upstream and
   // the route falls back to popularity ordering if this fails, so a retry would
   // only risk blowing the timeout.
   const stream = client().messages.stream({
     model: CURATION_MODEL,
-    max_tokens: 4096,
+    max_tokens: 32000,
     system: CURATION_SYSTEM_PROMPT,
-    thinking: { type: "adaptive" },
+    thinking: { type: "disabled" },
     output_config: {
-      effort: "medium",
+      effort: "low",
       format: zodOutputFormat(SelectionSchema),
     },
     messages: [{ role: "user", content: userContent }],
