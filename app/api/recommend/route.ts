@@ -14,7 +14,7 @@ import {
 import type { MoodProfile, Recommendation } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 export async function POST(req: Request) {
   try {
@@ -97,10 +97,15 @@ export async function POST(req: Request) {
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));
     const valid = picks.filter((p) => validKeys.has(`${p.mediaType}:${p.id}`));
 
-    const settled = await Promise.all(valid.map((p) => enrich(p)));
-    const recommendations = settled.filter(
-      (r): r is Recommendation => r !== null,
-    );
+    // Enrich in batches to avoid overwhelming TMDB and to be deadline-aware.
+    // Batch size of 5 to keep latency reasonable.
+    const recommendations: Recommendation[] = [];
+    const batchSize = 5;
+    for (let i = 0; i < valid.length; i += batchSize) {
+      const batch = valid.slice(i, i + batchSize);
+      const settled = await Promise.all(batch.map((p) => enrich(p)));
+      recommendations.push(...settled.filter((r): r is Recommendation => r !== null));
+    }
 
     return NextResponse.json({ recommendations });
   } catch (err) {

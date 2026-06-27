@@ -208,7 +208,7 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
 
   const addRaw = (list: RawTitle[]) => {
     for (const t of list) {
-      if (candidates.length >= 100) return;
+      if (candidates.length >= 60) return;
       const mediaType = (t.media_type as MediaType) || "movie";
       if (!types.includes(mediaType)) continue;
       const key = `${mediaType}:${t.id}`;
@@ -283,7 +283,7 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
 
   // Sparse genres (e.g. Reality) shrink under strict filters — relax the vote
   // floor and widen the window (still flatrate/streaming) to fill the pool out.
-  if (candidates.length < 18) {
+  if (candidates.length < 15) {
     const fallbackStrands = await Promise.all(
       types.map((type) =>
         discoverStrand(type, {
