@@ -18,6 +18,24 @@ import type {
 
 type Phase = "landing" | "interview" | "loading" | "results" | "error";
 
+// Mood seeds for "Surprise me" — spread across genres/moods so repeated presses
+// feel genuinely different. Each is run through the same free-text -> profile ->
+// curation pipeline.
+const SURPRISE_SEEDS = [
+  "Surprise me with the buzziest thing streaming right now.",
+  "Pick a hidden gem most people missed — your bold wildcard.",
+  "Give me a cozy, feel-good comfort watch for tonight.",
+  "I want an edge-of-my-seat thriller — you choose.",
+  "Hit me with a mind-bending sci-fi pick.",
+  "Choose a critically acclaimed recent drama for me.",
+  "Something fun and mindless to switch my brain off.",
+  "A gripping true-crime story — your pick.",
+  "Surprise me with a great recent comedy.",
+  "Your boldest, most unexpected recommendation tonight.",
+  "A heartwarming animated movie the whole room would enjoy.",
+  "Something dark, atmospheric, and a little unsettling.",
+];
+
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("landing");
   const [history, setHistory] = useState<InterviewTurn[]>([]);
@@ -178,6 +196,13 @@ export default function Home() {
     }
   }
 
+  // "Surprise me" — pick a random mood seed and let the LLM curate from it, so
+  // each press lands on a different corner of what's streaming.
+  function surpriseMe() {
+    const seed = SURPRISE_SEEDS[Math.floor(Math.random() * SURPRISE_SEEDS.length)];
+    quickSearch(seed);
+  }
+
   function start() {
     setHistory([]);
     setQuestion(null);
@@ -239,7 +264,8 @@ export default function Home() {
     setError(null);
   }
 
-  if (phase === "landing") return <Hero onSearch={quickSearch} onStart={start} />;
+  if (phase === "landing")
+    return <Hero onSearch={quickSearch} onRandom={surpriseMe} onStart={start} />;
 
   if (phase === "loading") return <Loader />;
 
