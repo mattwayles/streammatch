@@ -62,6 +62,29 @@ async function genreNameToId(type: MediaType): Promise<Map<string, number>> {
   return map;
 }
 
+interface KeywordSearchResult {
+  results: { id: number; name: string }[];
+}
+
+/** Resolve free-text keyword hints to TMDB keyword IDs (best-effort, fire-and-forget on failure). */
+async function resolveKeywordIds(keywords: string[]): Promise<number[]> {
+  if (keywords.length === 0) return [];
+  const ids: number[] = [];
+  await Promise.all(
+    keywords.slice(0, 6).map(async (kw) => {
+      try {
+        const data = await tmdb<KeywordSearchResult>("/search/keyword", { query: kw });
+        const exact = data.results.find((r) => r.name.toLowerCase() === kw.toLowerCase());
+        const pick = exact ?? data.results[0];
+        if (pick) ids.push(pick.id);
+      } catch {
+        // keyword lookup is best-effort
+      }
+    }),
+  );
+  return [...new Set(ids)];
+}
+
 /** Fuzzy-map human genre names to TMDB ids for a given media type. */
 async function resolveGenreIds(names: string[], type: MediaType): Promise<number[]> {
   if (names.length === 0) return [];
@@ -129,6 +152,7 @@ function eraWindow(type: MediaType, era: MoodProfile["era"], months: number): Re
 
 interface StrandOpts {
   genreIds: number[];
+  keywordIds?: number[];
   sortBy: string;
   voteCountGte: number;
   window: Record<string, string>;
@@ -144,6 +168,9 @@ async function discoverStrand(type: MediaType, opts: StrandOpts): Promise<RawTit
     "vote_count.gte": opts.voteCountGte,
     // OR across genres (pipe) so the pool stays broad and relevant, not over-narrowed.
     with_genres: opts.genreIds.length ? opts.genreIds.join("|") : undefined,
+    // OR across keywords — titles must match genre AND at least one keyword, which
+    // filters out genre-adjacent noise (e.g. crime dramas when intent is true-crime docs).
+    with_keywords: opts.keywordIds?.length ? opts.keywordIds.join("|") : undefined,
     ...opts.window,
   });
   return data.results.map((r) => ({ ...r, media_type: type }));
@@ -170,6 +197,10 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
   for (const type of types) {
     genreIdsByType.set(type, await resolveGenreIds(profile.genreNames, type));
   }
+
+  // Resolve keyword IDs so TMDB can filter by content intent (e.g. "true crime",
+  // "murder") — not just broad genre buckets that swallow unrelated titles.
+  const keywordIds = await resolveKeywordIds(profile.keywords ?? []);
 
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
@@ -203,12 +234,35 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
     }
   };
 
+  // When the user's intent is documentary (e.g. true crime docs), run a dedicated
+  // documentary strand FIRST so docs claim pool slots before crime dramas fill them.
+  const wantsDocumentary = profile.genreNames.some(
+    (g) => g.toLowerCase() === "documentary",
+  );
+  if (wantsDocumentary && keywordIds.length > 0) {
+    for (const type of types) {
+      const docIds = await resolveGenreIds(["Documentary"], type);
+      if (docIds.length > 0) {
+        addRaw(
+          await discoverStrand(type, {
+            genreIds: docIds,
+            keywordIds,
+            sortBy: "popularity.desc",
+            voteCountGte: 10,
+            window: eraWindow(type, profile.era, 48),
+          }),
+        );
+      }
+    }
+  }
+
   for (const type of types) {
     const genreIds = genreIdsByType.get(type)!;
     // Buzzing now: most popular recent streaming titles in-genre.
     addRaw(
       await discoverStrand(type, {
         genreIds,
+        keywordIds,
         sortBy: "popularity.desc",
         voteCountGte: 50,
         window: eraWindow(type, profile.era, 24),
@@ -218,6 +272,7 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
     addRaw(
       await discoverStrand(type, {
         genreIds,
+        keywordIds,
         sortBy: "vote_average.desc",
         voteCountGte: 200,
         window: eraWindow(type, profile.era, 36),
@@ -232,6 +287,7 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
       addRaw(
         await discoverStrand(type, {
           genreIds: genreIdsByType.get(type)!,
+          keywordIds,
           sortBy: "popularity.desc",
           voteCountGte: 10,
           window: eraWindow(type, profile.era, 60),
