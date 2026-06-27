@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     } else {
       allCandidates = await withTimeout(
         buildCandidatePool(profile),
-        20000,
+        25000,
         "buildCandidatePool",
       );
     }

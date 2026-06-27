@@ -102,6 +102,22 @@ async function resolveGenreIds(names: string[], type: MediaType): Promise<number
 }
 
 // ---------------------------------------------------------------------------
+// Candidate pool caching
+// ---------------------------------------------------------------------------
+
+const candidateCache = new Map<string, { candidates: Candidate[]; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function cacheKeyForProfile(profile: MoodProfile): string {
+  return JSON.stringify({
+    mediaType: profile.mediaType,
+    genreNames: profile.genreNames,
+    keywords: profile.keywords,
+    era: profile.era,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Candidate pool
 // ---------------------------------------------------------------------------
 
@@ -181,7 +197,7 @@ async function discoverStrand(type: MediaType, opts: StrandOpts): Promise<RawTit
  * (b) recent, and (c) on-genre — blending a "buzzing now" strand (popularity)
  * with an "acclaimed recent" strand (rating) so results are fresh, not boilerplate.
  */
-export async function buildCandidatePool(profile: MoodProfile): Promise<Candidate[]> {
+async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candidate[]> {
   const types: MediaType[] =
     profile.mediaType === "both" ? ["movie", "tv"] : [profile.mediaType];
 
@@ -273,6 +289,24 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
   );
   mainStrands.forEach((s) => addRaw(s));
 
+  return candidates;
+}
+
+/**
+ * Build candidate pool with caching. If a pool for this profile was built
+ * recently (within 5 minutes), return the cached version. Otherwise, build
+ * fresh and cache the result.
+ */
+export async function buildCandidatePool(profile: MoodProfile): Promise<Candidate[]> {
+  const cacheKey = cacheKeyForProfile(profile);
+  const cached = candidateCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.candidates;
+  }
+
+  const candidates = await buildCandidatePoolUncached(profile);
+  candidateCache.set(cacheKey, { candidates, timestamp: Date.now() });
   return candidates;
 }
 
