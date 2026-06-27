@@ -28,7 +28,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number, name: string): Promise<
   ]);
 }
 
+function checkDeadline(startTime: number, remainingBudget: number): void {
+  const elapsed = Date.now() - startTime;
+  if (elapsed > remainingBudget) {
+    throw new Error(`Deadline exceeded: ${elapsed}ms elapsed of ${remainingBudget}ms budget`);
+  }
+}
+
 export async function POST(req: Request) {
+  const requestStart = Date.now();
+  const HARD_DEADLINE_MS = 55000; // 55s to stay under 60s function limit
+
   try {
     const body = await req.json().catch(() => ({}));
     const profile: MoodProfile | undefined = body?.profile;
@@ -36,31 +46,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing mood profile" }, { status: 400 });
     }
 
+    checkDeadline(requestStart, HARD_DEADLINE_MS);
+
     let allCandidates;
     if (profile.watchlistMode) {
-      // Build candidate pool from the user's saved watchlist instead of TMDB discover.
+      checkDeadline(requestStart, HARD_DEADLINE_MS);
       const watchlistItems = await withTimeout(
         listWatchlist(),
-        15000,
+        10000,
         "listWatchlist",
       );
       if (watchlistItems.length === 0) {
         return NextResponse.json({ recommendations: [], watchlistEmpty: true });
       }
+      checkDeadline(requestStart, HARD_DEADLINE_MS);
       allCandidates = await withTimeout(
         buildCandidatesFromIds(
           watchlistItems.map((item) => ({ id: item.tmdbId, mediaType: item.mediaType })),
         ),
-        30000,
+        15000,
         "buildCandidatesFromIds",
       );
     } else {
+      checkDeadline(requestStart, HARD_DEADLINE_MS);
       allCandidates = await withTimeout(
         buildCandidatePool(profile),
-        25000,
+        20000,
         "buildCandidatePool",
       );
     }
+
+    checkDeadline(requestStart, HARD_DEADLINE_MS);
 
     // Filter out watched, liked (already seen), disliked, and saved watchlist titles.
     const [watched, disliked, liked, watchlistSet, dislikedList, likedList] = await withTimeout(
@@ -72,9 +88,11 @@ export async function POST(req: Request) {
         listDisliked(),
         listLiked(),
       ]),
-      20000,
+      15000,
       "Supabase operations",
     );
+
+    checkDeadline(requestStart, HARD_DEADLINE_MS);
 
     const candidates = allCandidates.filter((c) => {
       const k = watchedKey(c.mediaType, c.id);
@@ -112,7 +130,12 @@ export async function POST(req: Request) {
         .slice(0, 20),
     )) as string[];
 
+    checkDeadline(requestStart, HARD_DEADLINE_MS);
+
     let picks = [];
+    const timeUntilDeadline = HARD_DEADLINE_MS - (Date.now() - requestStart);
+    const llmTimeout = Math.min(20000, Math.max(5000, timeUntilDeadline - 5000));
+
     try {
       picks = await withTimeout(
         selectRecommendations(
@@ -123,11 +146,14 @@ export async function POST(req: Request) {
           watchedTitles,
           watchlistTitles,
         ),
-        30000,
+        llmTimeout,
         "selectRecommendations (Anthropic)",
       );
     } catch (err) {
-      console.error("[selectRecommendations timeout] returning top candidates instead:", err);
+      console.error(
+        `[selectRecommendations timeout after ${Date.now() - requestStart}ms] returning top candidates:`,
+        err,
+      );
       // Fallback: return top candidates by popularity if LLM times out
       picks = candidates
         .sort((a, b) => b.popularity - a.popularity)
@@ -139,6 +165,8 @@ export async function POST(req: Request) {
           vibeCheck: "Trending",
         }));
     }
+
+    checkDeadline(requestStart, HARD_DEADLINE_MS);
 
     // Drop any pick the model invented that isn't in the real pool.
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));
