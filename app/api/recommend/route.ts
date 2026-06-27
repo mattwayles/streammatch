@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     } else {
       allCandidates = await withTimeout(
         buildCandidatePool(profile),
-        45000,
+        20000,
         "buildCandidatePool",
       );
     }
@@ -112,18 +112,33 @@ export async function POST(req: Request) {
         .slice(0, 20),
     )) as string[];
 
-    const picks = await withTimeout(
-      selectRecommendations(
-        profile,
-        candidates,
-        dislikedTitles,
-        likedTitles,
-        watchedTitles,
-        watchlistTitles,
-      ),
-      60000,
-      "selectRecommendations (Anthropic)",
-    );
+    let picks = [];
+    try {
+      picks = await withTimeout(
+        selectRecommendations(
+          profile,
+          candidates,
+          dislikedTitles,
+          likedTitles,
+          watchedTitles,
+          watchlistTitles,
+        ),
+        30000,
+        "selectRecommendations (Anthropic)",
+      );
+    } catch (err) {
+      console.error("[selectRecommendations timeout] returning top candidates instead:", err);
+      // Fallback: return top candidates by popularity if LLM times out
+      picks = candidates
+        .sort((a, b) => b.popularity - a.popularity)
+        .slice(0, 15)
+        .map((c) => ({
+          id: c.id,
+          mediaType: c.mediaType,
+          whyThisFits: "Popular right now",
+          vibeCheck: "Trending",
+        }));
+    }
 
     // Drop any pick the model invented that isn't in the real pool.
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));

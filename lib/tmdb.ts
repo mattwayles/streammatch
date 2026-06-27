@@ -257,46 +257,21 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
     docStrands.forEach((s) => addRaw(s));
   }
 
-  // Fetch popularity and rating strands in parallel per type
+  // Fetch only popularity strand (fast, cuts API calls in half).
+  // Rating strand removed to reduce latency and API load.
   const mainStrands = await Promise.all(
-    types.flatMap((type) => {
+    types.map((type) => {
       const genreIds = genreIdsByType.get(type)!;
-      return [
-        discoverStrand(type, {
-          genreIds,
-          keywordIds,
-          sortBy: "popularity.desc",
-          voteCountGte: 50,
-          window: eraWindow(type, profile.era, 24),
-        }),
-        discoverStrand(type, {
-          genreIds,
-          keywordIds,
-          sortBy: "vote_average.desc",
-          voteCountGte: 200,
-          window: eraWindow(type, profile.era, 36),
-        }),
-      ];
+      return discoverStrand(type, {
+        genreIds,
+        keywordIds,
+        sortBy: "popularity.desc",
+        voteCountGte: 50,
+        window: eraWindow(type, profile.era, 24),
+      });
     }),
   );
   mainStrands.forEach((s) => addRaw(s));
-
-  // Sparse genres (e.g. Reality) shrink under strict filters — relax the vote
-  // floor and widen the window (still flatrate/streaming) to fill the pool out.
-  if (candidates.length < 15) {
-    const fallbackStrands = await Promise.all(
-      types.map((type) =>
-        discoverStrand(type, {
-          genreIds: genreIdsByType.get(type)!,
-          keywordIds,
-          sortBy: "popularity.desc",
-          voteCountGte: 10,
-          window: eraWindow(type, profile.era, 60),
-        }),
-      ),
-    );
-    fallbackStrands.forEach((s) => addRaw(s));
-  }
 
   return candidates;
 }
