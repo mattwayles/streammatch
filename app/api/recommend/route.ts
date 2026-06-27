@@ -14,18 +14,24 @@ import {
 import type { MoodProfile, Recommendation } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+// The whole request is designed to finish well under 60s (see HARD_DEADLINE_MS
+// below). 60s is also the Hobby-plan ceiling, so a larger value would silently
+// clamp; keep these two numbers in sync with each other.
+export const maxDuration = 60;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, name: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${name} exceeded ${ms}ms timeout`)),
-        ms,
-      ),
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${name} exceeded ${ms}ms timeout`)),
+      ms,
+    );
+  });
+  // Swallow the loser's eventual rejection so a settled race never produces an
+  // unhandled promise rejection (which crashes the serverless function → 502).
+  timeout.catch(() => {});
+  promise.catch(() => {});
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function checkDeadline(startTime: number, remainingBudget: number): void {

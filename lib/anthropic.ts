@@ -211,55 +211,46 @@ export interface Candidate {
   popularity: number;
 }
 
-async function parseSelectionsWithRetry(
-  userContent: string,
-  attempt = 1,
-  maxAttempts = 2,
-): Promise<Pick[]> {
-  try {
-    const response = await client().messages.parse({
-      model: CURATION_MODEL,
-      max_tokens: 4096,
-      system: CURATION_SYSTEM_PROMPT,
-      thinking: { type: "adaptive" },
-      output_config: {
-        effort: "high",
-        format: zodOutputFormat(SelectionSchema),
-      },
-      messages: [{ role: "user", content: userContent }],
-    });
+async function parseSelections(userContent: string): Promise<Pick[]> {
+  // Stream the request: this is a large-input, thinking-enabled call, and a
+  // non-streaming request risks hitting the SDK/platform HTTP timeout before it
+  // returns. `effort: "medium"` keeps thinking-token latency in budget — this is
+  // a "pick from a list" task, not one that needs maximum reasoning depth.
+  // No in-process retry: the request is bounded by a hard deadline upstream and
+  // the route falls back to popularity ordering if this fails, so a retry would
+  // only risk blowing the timeout.
+  const stream = client().messages.stream({
+    model: CURATION_MODEL,
+    max_tokens: 4096,
+    system: CURATION_SYSTEM_PROMPT,
+    thinking: { type: "adaptive" },
+    output_config: {
+      effort: "medium",
+      format: zodOutputFormat(SelectionSchema),
+    },
+    messages: [{ role: "user", content: userContent }],
+  });
 
-    const parsed = response.parsed_output;
-    if (!parsed) {
-      throw new Error("parsed_output is null");
-    }
+  const message = await stream.finalMessage();
 
-    if (!Array.isArray(parsed.picks)) {
-      throw new Error("picks is not an array");
-    }
+  // Structured outputs guarantee the text block is valid JSON matching the
+  // schema; concatenate the text blocks and validate.
+  const text = message.content
+    .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+    .map((b) => b.text)
+    .join("");
 
-    if (parsed.picks.length === 0) {
-      console.warn("[parseSelectionsWithRetry] model returned 0 picks");
-    }
-
-    return parsed.picks;
-  } catch (err) {
-    if (attempt < maxAttempts) {
-      console.warn(
-        `[parseSelectionsWithRetry] attempt ${attempt} failed, retrying... Error: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
-      return parseSelectionsWithRetry(userContent, attempt + 1, maxAttempts);
-    }
-
-    throw new Error(
-      `Selection parsing failed after ${maxAttempts} attempts: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+  if (!text) {
+    throw new Error("Selection response contained no text output");
   }
+
+  const parsed = SelectionSchema.parse(JSON.parse(text));
+
+  if (parsed.picks.length === 0) {
+    console.warn("[parseSelections] model returned 0 picks");
+  }
+
+  return parsed.picks;
 }
 
 export async function selectRecommendations(
@@ -300,5 +291,5 @@ export async function selectRecommendations(
     2,
   )}${likedBlock}${avoidBlock}${watchedBlock}${watchlistBlock}`;
 
-  return parseSelectionsWithRetry(userContent);
+  return parseSelections(userContent);
 }
