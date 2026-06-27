@@ -86,20 +86,68 @@ export default function Home() {
         return;
       }
 
-      // Step 2: LLM curation only — fast, isolated, gets its own time budget.
+      // Step 2: LLM curation, streamed. The endpoint returns newline-delimited
+      // JSON — one recommendation per pick as the model produces it — so cards
+      // render incrementally and a large result set never has to fit inside a
+      // single response within the time budget.
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile, ...candData }),
       });
-      const data = (await res.json()) as
-        | { recommendations: Recommendation[] }
-        | { error: string };
-      if (!res.ok || "error" in data) {
-        throw new Error("error" in data ? data.error : "Recommendation request failed");
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errData.error ?? "Recommendation request failed");
       }
-      setRecs(data.recommendations);
-      setPhase("results");
+      if (!res.body) throw new Error("Recommendation stream was empty");
+
+      setRecs([]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let started = false;
+
+      const handleLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let msg: { type: string; rec?: Recommendation };
+        try {
+          msg = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+        if (msg.type === "rec" && msg.rec) {
+          if (!started) {
+            started = true;
+            setPhase("results");
+          }
+          setRecs((prev) => [...prev, msg.rec as Recommendation]);
+        }
+      };
+
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            handleLine(buffer.slice(0, nl));
+            buffer = buffer.slice(nl + 1);
+          }
+        }
+        handleLine(buffer);
+      } catch (streamErr) {
+        // Once cards are on screen, keep the partial set rather than wiping it
+        // out with an error screen; only surface failures that happened before
+        // anything rendered.
+        if (!started) throw streamErr;
+        console.error("[curate] stream interrupted after partial results:", streamErr);
+      }
+
+      // No results streamed (empty pool, or an early failure) — still land on
+      // the results view rather than hanging on the loader.
+      if (!started) setPhase("results");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setPhase("error");

@@ -214,59 +214,70 @@ export interface Candidate {
   screenshotUrl: string | null;
 }
 
-async function parseSelections(userContent: string): Promise<Pick[]> {
-  // Stream the request: this returns a large list (potentially 60-100 picks),
-  // and a non-streaming request would risk the SDK/platform HTTP timeout before
-  // it returns. This is a "select everything that fits from a list" task, so we
-  // disable extended thinking and run at low effort — the dominant cost is the
-  // output tokens for all those picks, not reasoning depth, and skipping
-  // thinking keeps the call inside the upstream time budget. `max_tokens` is
-  // large so a long result list isn't truncated mid-stream.
-  // No in-process retry: the request is bounded by a hard deadline upstream and
-  // the route falls back to popularity ordering if this fails, so a retry would
-  // only risk blowing the timeout.
-  const stream = client().messages.stream({
-    model: CURATION_MODEL,
-    max_tokens: 32000,
-    system: CURATION_SYSTEM_PROMPT,
-    thinking: { type: "disabled" },
-    output_config: {
-      effort: "low",
-      format: zodOutputFormat(SelectionSchema),
-    },
-    messages: [{ role: "user", content: userContent }],
-  });
+const PickItemSchema = z.object({
+  id: z.number().int(),
+  mediaType: z.enum(["movie", "tv"]),
+  whyThisFits: z.string(),
+  vibeCheck: z.string(),
+});
 
-  const message = await stream.finalMessage();
+/**
+ * Pulls complete pick objects out of the structured-output JSON as it streams
+ * in. The model emits `{"picks":[{...},{...}, ...]}`; this scans the growing
+ * buffer (tracking string/escape state) and yields each top-level `{...}` inside
+ * the array the moment it closes, so callers can render picks incrementally.
+ */
+class PickStreamExtractor {
+  private buf = "";
+  private scan = 0;
+  private inArray = false;
+  private objStart = -1;
+  private depth = 0;
+  private inString = false;
+  private escaped = false;
 
-  // Structured outputs guarantee the text block is valid JSON matching the
-  // schema; concatenate the text blocks and validate.
-  const text = message.content
-    .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
-  if (!text) {
-    throw new Error("Selection response contained no text output");
+  push(delta: string): string[] {
+    this.buf += delta;
+    const out: string[] = [];
+    for (let i = this.scan; i < this.buf.length; i++) {
+      const ch = this.buf[i];
+      if (this.inString) {
+        if (this.escaped) this.escaped = false;
+        else if (ch === "\\") this.escaped = true;
+        else if (ch === '"') this.inString = false;
+        continue;
+      }
+      if (!this.inArray) {
+        // The root object is `{"picks":[` — wait for the array to open.
+        if (ch === "[") this.inArray = true;
+        continue;
+      }
+      if (ch === '"') {
+        this.inString = true;
+      } else if (ch === "{") {
+        if (this.depth === 0) this.objStart = i;
+        this.depth++;
+      } else if (ch === "}") {
+        this.depth--;
+        if (this.depth === 0 && this.objStart >= 0) {
+          out.push(this.buf.slice(this.objStart, i + 1));
+          this.objStart = -1;
+        }
+      }
+    }
+    this.scan = this.buf.length;
+    return out;
   }
-
-  const parsed = SelectionSchema.parse(JSON.parse(text));
-
-  if (parsed.picks.length === 0) {
-    console.warn("[parseSelections] model returned 0 picks");
-  }
-
-  return parsed.picks;
 }
 
-export async function selectRecommendations(
+function buildCurationUserContent(
   profile: MoodProfile,
   candidates: Candidate[],
-  dislikedTitles: string[] = [],
-  likedTitles: string[] = [],
-  watchedTitles: string[] = [],
-  watchlistTitles: string[] = [],
-): Promise<Pick[]> {
+  dislikedTitles: string[],
+  likedTitles: string[],
+  watchedTitles: string[],
+  watchlistTitles: string[],
+): string {
   const likedBlock = likedTitles.length
     ? `\n\nLIKED LIST — the user has LOVED these before; prioritize candidates with similar genre, tone, and themes:\n${likedTitles
         .map((t) => `- ${t}`)
@@ -304,11 +315,85 @@ export async function selectRecommendations(
     popularity: c.popularity,
   }));
 
-  const userContent = `USER MOOD PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nCANDIDATE TITLES (pick from these only):\n${JSON.stringify(
+  return `USER MOOD PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nCANDIDATE TITLES (pick from these only):\n${JSON.stringify(
     promptCandidates,
     null,
     2,
   )}${likedBlock}${avoidBlock}${watchedBlock}${watchlistBlock}`;
+}
 
-  return parseSelections(userContent);
+/**
+ * Streams the curation selection, invoking `onPick` for each pick the moment the
+ * model finishes writing it. Picks that fail validation are skipped. The model
+ * call is bounded by `deadlineMs`; when it elapses the stream is aborted cleanly
+ * and whatever was emitted so far stands.
+ *
+ * Streaming (rather than awaiting the whole list) means the client renders cards
+ * incrementally, so a large result set (60-100) never depends on the full
+ * response fitting inside a single request's time budget.
+ */
+export async function streamSelections(
+  profile: MoodProfile,
+  candidates: Candidate[],
+  dislikedTitles: string[],
+  likedTitles: string[],
+  watchedTitles: string[],
+  watchlistTitles: string[],
+  onPick: (pick: Pick) => void,
+  deadlineMs: number,
+): Promise<void> {
+  const userContent = buildCurationUserContent(
+    profile,
+    candidates,
+    dislikedTitles,
+    likedTitles,
+    watchedTitles,
+    watchlistTitles,
+  );
+
+  // This is a "select everything that fits from a list" task, so we disable
+  // extended thinking and run at low effort — the dominant cost is the output
+  // tokens for all the picks, not reasoning depth. `max_tokens` is large so a
+  // long list isn't truncated mid-stream.
+  const stream = client().messages.stream({
+    model: CURATION_MODEL,
+    max_tokens: 32000,
+    system: CURATION_SYSTEM_PROMPT,
+    thinking: { type: "disabled" },
+    output_config: {
+      effort: "low",
+      format: zodOutputFormat(SelectionSchema),
+    },
+    messages: [{ role: "user", content: userContent }],
+  });
+
+  const extractor = new PickStreamExtractor();
+  const start = Date.now();
+
+  try {
+    for await (const event of stream) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        for (const slice of extractor.push(event.delta.text)) {
+          const parsed = PickItemSchema.safeParse(safeJsonParse(slice));
+          if (parsed.success) onPick(parsed.data);
+        }
+      }
+      if (Date.now() - start > deadlineMs) {
+        stream.abort();
+        break;
+      }
+    }
+  } catch (err) {
+    // A deadline abort surfaces as APIUserAbortError — that's expected; rethrow
+    // anything else so the route can fall back.
+    if (!(err instanceof Anthropic.APIUserAbortError)) throw err;
+  }
+}
+
+function safeJsonParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
 }

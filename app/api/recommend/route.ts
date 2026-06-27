@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { selectRecommendations } from "@/lib/anthropic";
+import { streamSelections } from "@/lib/anthropic";
 import type { Candidate, Pick } from "@/lib/anthropic";
-import { withTimeout } from "@/lib/timeout";
 import type { MoodProfile, Recommendation } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Stop the model stream a few seconds under the platform limit so we always
+// finish (emit "done" / fall back) before the function is killed.
+const SELECTION_DEADLINE_MS = 52000;
 
 interface RecommendBody {
   profile?: MoodProfile;
@@ -16,90 +19,107 @@ interface RecommendBody {
   watchlistTitles?: string[];
 }
 
+function toRecommendation(candidate: Candidate, pick: Pick): Recommendation {
+  return {
+    id: candidate.id,
+    mediaType: candidate.mediaType,
+    title: candidate.title,
+    year: candidate.year,
+    description: candidate.overview,
+    rating: candidate.rating,
+    voteCount: 0,
+    screenshotUrl: candidate.screenshotUrl,
+    posterUrl: candidate.posterUrl,
+    providers: [],
+    reviews: [],
+    whyThisFits: pick.whyThisFits,
+    vibeCheck: pick.vibeCheck,
+  };
+}
+
 /**
- * Pure LLM curation. Receives a pre-built candidate pool and taste context from
- * /api/candidates, runs the model selection, and maps picks back to display
- * recommendations. No TMDB or Supabase I/O happens here, so the model call gets
- * the function's full time budget. Falls back to popularity ordering if the LLM
- * call fails, so the user still gets results.
+ * Pure LLM curation, streamed. Receives a pre-built candidate pool + taste
+ * context from /api/candidates and streams newline-delimited JSON back to the
+ * client — one `{type:"rec", rec}` per pick as the model produces it, then a
+ * final `{type:"done"}`. Because cards render as they arrive, a large result set
+ * never has to fit inside a single response within the time budget. If the model
+ * produces nothing, falls back to popularity ordering so the user still gets
+ * results.
  */
 export async function POST(req: Request) {
-  try {
-    const body: RecommendBody = await req.json().catch(() => ({}));
-    const { profile, candidates } = body;
+  const body: RecommendBody = await req.json().catch(() => ({}));
+  const { profile, candidates } = body;
 
-    if (!profile || typeof profile !== "object") {
-      return NextResponse.json({ error: "Missing mood profile" }, { status: 400 });
-    }
-    if (!Array.isArray(candidates) || candidates.length === 0) {
-      return NextResponse.json({ recommendations: [] });
-    }
+  if (!profile || typeof profile !== "object") {
+    return NextResponse.json({ error: "Missing mood profile" }, { status: 400 });
+  }
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return NextResponse.json({ error: "No candidates provided" }, { status: 400 });
+  }
 
-    let picks: Pick[];
-    try {
-      // Cap below the 60s platform limit so a hung model trips the fallback
-      // rather than letting the platform kill the function (504).
-      picks = await withTimeout(
-        selectRecommendations(
+  // Index candidates for O(1) lookup and to drop any pick the model invents.
+  const byKey = new Map(candidates.map((c) => [`${c.mediaType}:${c.id}`, c]));
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const seen = new Set<string>();
+      let emitted = 0;
+
+      const emit = (obj: unknown) =>
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+
+      const emitPick = (pick: Pick) => {
+        const key = `${pick.mediaType}:${pick.id}`;
+        const candidate = byKey.get(key);
+        if (!candidate || seen.has(key)) return;
+        seen.add(key);
+        emit({ type: "rec", rec: toRecommendation(candidate, pick) });
+        emitted++;
+      };
+
+      try {
+        await streamSelections(
           profile,
           candidates,
           body.dislikedTitles ?? [],
           body.likedTitles ?? [],
           body.watchedTitles ?? [],
           body.watchlistTitles ?? [],
-        ),
-        52000,
-        "selectRecommendations (Anthropic)",
-      );
-    } catch (err) {
-      console.error("[/api/recommend] LLM selection failed, falling back to popularity:", err);
-      picks = [...candidates]
-        .sort((a, b) => b.popularity - a.popularity)
-        .slice(0, 60)
-        .map((c) => ({
-          id: c.id,
-          mediaType: c.mediaType,
-          whyThisFits: "Popular right now",
-          vibeCheck: "Trending",
-        }));
-    }
+          emitPick,
+          SELECTION_DEADLINE_MS,
+        );
+      } catch (err) {
+        console.error("[/api/recommend] selection stream failed:", err);
+      }
 
-    // Drop any pick the model invented that isn't in the real pool.
-    const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));
-    const valid = picks.filter((p) => validKeys.has(`${p.mediaType}:${p.id}`));
+      // Nothing usable from the model — fall back to popularity so the user
+      // still gets a full set of results.
+      if (emitted === 0) {
+        const fallback = [...candidates]
+          .sort((a, b) => b.popularity - a.popularity)
+          .slice(0, 60);
+        for (const c of fallback) {
+          emitPick({
+            id: c.id,
+            mediaType: c.mediaType,
+            whyThisFits: "Popular right now",
+            vibeCheck: "Trending",
+          });
+        }
+      }
 
-    // Map picks to recommendations using candidate data (no enrichment here —
-    // providers/reviews/screenshots are fetched client-side or in background).
-    const recommendations: Recommendation[] = [];
-    for (const pick of valid) {
-      const candidate = candidates.find(
-        (c) => c.id === pick.id && c.mediaType === pick.mediaType,
-      );
-      if (!candidate) continue;
-      recommendations.push({
-        id: candidate.id,
-        mediaType: candidate.mediaType,
-        title: candidate.title,
-        year: candidate.year,
-        description: candidate.overview,
-        rating: candidate.rating,
-        voteCount: 0,
-        screenshotUrl: candidate.screenshotUrl,
-        posterUrl: candidate.posterUrl,
-        providers: [],
-        reviews: [],
-        whyThisFits: pick.whyThisFits,
-        vibeCheck: pick.vibeCheck,
-      });
-    }
+      emit({ type: "done" });
+      controller.close();
+    },
+  });
 
-    return NextResponse.json({ recommendations });
-  } catch (err) {
-    console.error("[/api/recommend]", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json(
-      { error: `Recommendation failed: ${message}` },
-      { status: 500 },
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      // Hint to proxies not to buffer, so chunks reach the client as they flush.
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
