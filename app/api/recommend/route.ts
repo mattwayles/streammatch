@@ -70,7 +70,28 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .slice(0, 30);
 
-    const picks = await selectRecommendations(profile, candidates, dislikedTitles, likedTitles);
+    const watchedTitles = (await Promise.resolve(
+      allCandidates
+        .filter((c) => watched.has(watchedKey(c.mediaType, c.id)))
+        .map((c) => c.title)
+        .slice(0, 20),
+    )) as string[];
+
+    const watchlistTitles = (await Promise.resolve(
+      allCandidates
+        .filter((c) => watchlistSet.has(watchedKey(c.mediaType, c.id)))
+        .map((c) => c.title)
+        .slice(0, 20),
+    )) as string[];
+
+    const picks = await selectRecommendations(
+      profile,
+      candidates,
+      dislikedTitles,
+      likedTitles,
+      watchedTitles,
+      watchlistTitles,
+    );
 
     // Drop any pick the model invented that isn't in the real pool.
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));
