@@ -82,13 +82,13 @@ export default function ResultCard({
         <p className="text-sm leading-relaxed text-white/55">{rec.description}</p>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <button
-              onClick={() => setShowReviews((s) => !s)}
-              className="text-sm font-medium text-glow-soft hover:underline"
-            >
-              {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
-            </button>
+          <button
+            onClick={() => setShowReviews((s) => !s)}
+            className="text-sm font-medium text-glow-soft hover:underline"
+          >
+            {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
+          </button>
+          <div className="flex gap-2">
             <button
               onClick={() => {
                 setSavedToWatchlist(true);
@@ -99,15 +99,6 @@ export default function ResultCard({
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
             >
               {savedToWatchlist ? "🔖 Saved" : "🔖 Watch Later"}
-            </button>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => onLiked(rec)}
-              title="Watched it and loved it — refine future suggestions toward more like this"
-              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
-            >
-              👍 Liked it
             </button>
             <button
               onClick={() => onWatched(rec)}
@@ -122,6 +113,13 @@ export default function ResultCard({
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
             >
               👎 Not for me
+            </button>
+            <button
+              onClick={() => onLiked(rec)}
+              title="Watched it and loved it — refine future suggestions toward more like this"
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
+            >
+              👍 Liked it
             </button>
           </div>
         </div>
