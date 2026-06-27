@@ -124,6 +124,62 @@ Tone: engaging, sharp, deeply intuitive. Return only the structured object.`;
 // Interview turn
 // ---------------------------------------------------------------------------
 
+async function parseInterviewWithRetry(
+  userContent: string,
+  attempt = 1,
+  maxAttempts = 3,
+): Promise<InterviewStep> {
+  try {
+    const response = await client().messages.parse({
+      model: INTERVIEW_MODEL,
+      max_tokens: 2048,
+      system: INTERVIEW_SYSTEM_PROMPT,
+      output_config: {
+        format: zodOutputFormat(InterviewSchema),
+      },
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const parsed = response.parsed_output;
+    if (!parsed) {
+      throw new Error("parsed_output is null");
+    }
+
+    // Validate the shape before returning
+    if (parsed.kind === "complete") {
+      if (!parsed.profile) {
+        throw new Error("complete step missing profile");
+      }
+      return { kind: "complete", profile: parsed.profile as MoodProfile };
+    }
+
+    if (parsed.kind === "question") {
+      if (!parsed.question) {
+        throw new Error("question step missing question");
+      }
+      return { kind: "question", question: parsed.question };
+    }
+
+    throw new Error(`unknown kind: ${parsed.kind}`);
+  } catch (err) {
+    if (attempt < maxAttempts) {
+      console.warn(
+        `[parseInterviewWithRetry] attempt ${attempt} failed, retrying... Error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      return parseInterviewWithRetry(userContent, attempt + 1, maxAttempts);
+    }
+
+    throw new Error(
+      `Interview parsing failed after ${maxAttempts} attempts: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 export async function nextInterviewStep(history: InterviewTurn[]): Promise<InterviewStep> {
   const userContent =
     history.length === 0
@@ -134,29 +190,7 @@ export async function nextInterviewStep(history: InterviewTurn[]): Promise<Inter
           2,
         )}\n\nProduce the next step. Ask another tailored question, or complete the interview if you have enough signal (typically after 3–4 questions total).`;
 
-  // Haiku 4.5 does not support the `effort` parameter (it errors), so omit it here.
-  const response = await client().messages.parse({
-    model: INTERVIEW_MODEL,
-    max_tokens: 2048,
-    system: INTERVIEW_SYSTEM_PROMPT,
-    output_config: {
-      format: zodOutputFormat(InterviewSchema),
-    },
-    messages: [{ role: "user", content: userContent }],
-  });
-
-  const parsed = response.parsed_output;
-  if (!parsed) {
-    throw new Error("Interview step could not be parsed");
-  }
-
-  if (parsed.kind === "complete" && parsed.profile) {
-    return { kind: "complete", profile: parsed.profile as MoodProfile };
-  }
-  if (parsed.kind === "question" && parsed.question) {
-    return { kind: "question", question: parsed.question };
-  }
-  throw new Error("Interview step had an inconsistent shape");
+  return parseInterviewWithRetry(userContent);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +207,57 @@ export interface Candidate {
   rating: number;
   /** TMDB popularity score — higher = more buzz right now. */
   popularity: number;
+}
+
+async function parseSelectionsWithRetry(
+  userContent: string,
+  attempt = 1,
+  maxAttempts = 3,
+): Promise<Pick[]> {
+  try {
+    const response = await client().messages.parse({
+      model: CURATION_MODEL,
+      max_tokens: 4096,
+      system: CURATION_SYSTEM_PROMPT,
+      thinking: { type: "adaptive" },
+      output_config: {
+        effort: "high",
+        format: zodOutputFormat(SelectionSchema),
+      },
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const parsed = response.parsed_output;
+    if (!parsed) {
+      throw new Error("parsed_output is null");
+    }
+
+    if (!Array.isArray(parsed.picks)) {
+      throw new Error("picks is not an array");
+    }
+
+    if (parsed.picks.length === 0) {
+      console.warn("[parseSelectionsWithRetry] model returned 0 picks");
+    }
+
+    return parsed.picks;
+  } catch (err) {
+    if (attempt < maxAttempts) {
+      console.warn(
+        `[parseSelectionsWithRetry] attempt ${attempt} failed, retrying... Error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      return parseSelectionsWithRetry(userContent, attempt + 1, maxAttempts);
+    }
+
+    throw new Error(
+      `Selection parsing failed after ${maxAttempts} attempts: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 }
 
 export async function selectRecommendations(
@@ -199,21 +284,5 @@ export async function selectRecommendations(
     2,
   )}${likedBlock}${avoidBlock}`;
 
-  const response = await client().messages.parse({
-    model: CURATION_MODEL,
-    max_tokens: 4096,
-    system: CURATION_SYSTEM_PROMPT,
-    thinking: { type: "adaptive" },
-    output_config: {
-      effort: "high",
-      format: zodOutputFormat(SelectionSchema),
-    },
-    messages: [{ role: "user", content: userContent }],
-  });
-
-  const parsed = response.parsed_output;
-  if (!parsed) {
-    throw new Error("Recommendation selection could not be parsed");
-  }
-  return parsed.picks;
+  return parseSelectionsWithRetry(userContent);
 }
