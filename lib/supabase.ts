@@ -2,7 +2,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { MediaType } from "./types";
 
 const TABLES = {
-  watched: "streammatch_watched",
   disliked: "streammatch_disliked",
   watchlist: "streammatch_watchlist",
   liked: "streammatch_liked",
@@ -30,7 +29,7 @@ export function isConfigured(): boolean {
 }
 
 /** "mediaType:tmdbId" key used for set membership / exclusion. */
-export function watchedKey(mediaType: MediaType, tmdbId: number): string {
+export function itemKey(mediaType: MediaType, tmdbId: number): string {
   return `${mediaType}:${tmdbId}`;
 }
 
@@ -40,11 +39,9 @@ export interface ListItem {
   title: string;
   createdAt: string;
 }
-// Back-compat alias.
-export type WatchedItem = ListItem;
 
 // ---------------------------------------------------------------------------
-// Generic core — one implementation, two lists (watched / disliked).
+// Generic core — one implementation across the disliked / liked / watchlist lists.
 // ---------------------------------------------------------------------------
 
 async function getKeys(kind: ListKind): Promise<Set<string>> {
@@ -104,17 +101,6 @@ async function unmark(kind: ListKind, tmdbId: number, mediaType: MediaType): Pro
     .eq("media_type", mediaType);
   if (error) throw new Error(error.message);
 }
-
-// ---------------------------------------------------------------------------
-// Watched
-// ---------------------------------------------------------------------------
-
-export const getWatchedKeys = () => getKeys("watched");
-export const listWatched = () => list("watched");
-export const markWatched = (tmdbId: number, mediaType: MediaType, title: string) =>
-  mark("watched", tmdbId, mediaType, title);
-export const unmarkWatched = (tmdbId: number, mediaType: MediaType) =>
-  unmark("watched", tmdbId, mediaType);
 
 // ---------------------------------------------------------------------------
 // Disliked

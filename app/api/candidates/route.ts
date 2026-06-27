@@ -3,12 +3,11 @@ import { buildCandidatePool, buildCandidatesFromIds } from "@/lib/tmdb";
 import {
   getDislikedKeys,
   getLikedKeys,
-  getWatchedKeys,
   getWatchlistKeys,
   listDisliked,
   listLiked,
   listWatchlist,
-  watchedKey,
+  itemKey,
 } from "@/lib/supabase";
 import { withTimeout } from "@/lib/timeout";
 import type { MoodProfile } from "@/lib/types";
@@ -18,7 +17,7 @@ export const maxDuration = 60;
 
 /**
  * Builds the curation inputs: a filtered TMDB candidate pool plus the user's
- * taste context (liked/disliked/watched/watchlist titles). This is the slow,
+ * taste context (liked/disliked/watchlist titles). This is the slow,
  * variable I/O half of recommendations (TMDB + Supabase) — split out from
  * /api/recommend so the LLM call gets its own time budget. The client calls
  * this first, then passes the result straight into /api/recommend.
@@ -48,9 +47,8 @@ export async function POST(req: Request) {
       allCandidates = await withTimeout(buildCandidatePool(profile), 30000, "buildCandidatePool");
     }
 
-    const [watched, disliked, liked, watchlistSet, dislikedList, likedList] = await withTimeout(
+    const [disliked, liked, watchlistSet, dislikedList, likedList] = await withTimeout(
       Promise.all([
-        getWatchedKeys(),
         getDislikedKeys(),
         getLikedKeys(),
         getWatchlistKeys(),
@@ -62,11 +60,11 @@ export async function POST(req: Request) {
     );
 
     const candidates = allCandidates.filter((c) => {
-      const k = watchedKey(c.mediaType, c.id);
-      // In watchlist mode keep items regardless of watched/watchlist status — user explicitly saved them.
+      const k = itemKey(c.mediaType, c.id);
+      // In watchlist mode keep items regardless of watchlist status — user explicitly saved them.
       if (profile.watchlistMode) return !disliked.has(k);
-      // Exclude watched, disliked, liked, and watchlist items from regular recommendations.
-      return !watched.has(k) && !disliked.has(k) && !liked.has(k) && !watchlistSet.has(k);
+      // Exclude disliked, liked, and watchlist items from regular recommendations.
+      return !disliked.has(k) && !liked.has(k) && !watchlistSet.has(k);
     });
 
     const dislikedTitles = dislikedList
@@ -79,13 +77,8 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .slice(0, 30);
 
-    const watchedTitles = allCandidates
-      .filter((c) => watched.has(watchedKey(c.mediaType, c.id)))
-      .map((c) => c.title)
-      .slice(0, 20);
-
     const watchlistTitles = allCandidates
-      .filter((c) => watchlistSet.has(watchedKey(c.mediaType, c.id)))
+      .filter((c) => watchlistSet.has(itemKey(c.mediaType, c.id)))
       .map((c) => c.title)
       .slice(0, 20);
 
@@ -93,7 +86,6 @@ export async function POST(req: Request) {
       candidates,
       dislikedTitles,
       likedTitles,
-      watchedTitles,
       watchlistTitles,
     });
   } catch (err) {

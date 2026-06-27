@@ -15,7 +15,6 @@ interface RecommendBody {
   candidates?: Candidate[];
   dislikedTitles?: string[];
   likedTitles?: string[];
-  watchedTitles?: string[];
   watchlistTitles?: string[];
 }
 
@@ -84,7 +83,6 @@ export async function POST(req: Request) {
           candidates,
           body.dislikedTitles ?? [],
           body.likedTitles ?? [],
-          body.watchedTitles ?? [],
           body.watchlistTitles ?? [],
           emitPick,
           SELECTION_DEADLINE_MS,

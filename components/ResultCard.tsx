@@ -7,13 +7,11 @@ import ReviewList from "./ReviewList";
 
 export default function ResultCard({
   rec,
-  onWatched,
   onDisliked,
   onLiked,
   onWatchlist,
 }: {
   rec: Recommendation;
-  onWatched: (rec: Recommendation) => void;
   onDisliked: (rec: Recommendation) => void;
   onLiked: (rec: Recommendation) => void;
   onWatchlist: (rec: Recommendation) => void;
@@ -108,13 +106,6 @@ export default function ResultCard({
               {savedToWatchlist ? "🔖 Saved" : "🔖 Watch Later"}
             </button>
             <button
-              onClick={() => onWatched(rec)}
-              title="Mark as watched and hide it from future suggestions"
-              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
-            >
-              ✓ Seen it
-            </button>
-            <button
               onClick={() => onDisliked(rec)}
               title="Not for me — hide it and refine future suggestions away from this"
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
@@ -123,7 +114,7 @@ export default function ResultCard({
             </button>
             <button
               onClick={() => onLiked(rec)}
-              title="Watched it and loved it — refine future suggestions toward more like this"
+              title="Loved it — refine future suggestions toward more like this"
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
             >
               👍 Liked it

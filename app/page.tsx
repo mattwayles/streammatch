@@ -84,7 +84,6 @@ export default function Home() {
             watchlistEmpty?: boolean;
             dislikedTitles: string[];
             likedTitles: string[];
-            watchedTitles: string[];
             watchlistTitles: string[];
           }
         | { error: string };
@@ -240,7 +239,6 @@ export default function Home() {
     }
   }
 
-  const markWatched = (rec: Recommendation) => hideAndPost(rec, "/api/watched");
   const markDisliked = (rec: Recommendation) => hideAndPost(rec, "/api/disliked");
   const markLiked = (rec: Recommendation) => hideAndPost(rec, "/api/liked");
 
@@ -351,7 +349,6 @@ export default function Home() {
             <ResultCard
               key={`${rec.mediaType}-${rec.id}`}
               rec={rec}
-              onWatched={markWatched}
               onDisliked={markDisliked}
               onLiked={markLiked}
               onWatchlist={addToWatchlist}

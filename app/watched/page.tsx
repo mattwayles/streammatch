@@ -4,10 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { ListItem } from "@/lib/supabase";
 
-type Kind = "watched" | "disliked" | "watchlist" | "liked";
+type Kind = "disliked" | "watchlist" | "liked";
 
 const ENDPOINT: Record<Kind, string> = {
-  watched: "/api/watched",
   disliked: "/api/disliked",
   watchlist: "/api/watchlist",
   liked: "/api/liked",
@@ -158,14 +157,8 @@ export default function LibraryPage() {
       <Section
         kind="liked"
         title="👍 Liked"
-        subtitle="Titles you've watched and loved — used as a positive taste signal to refine future recommendations."
+        subtitle="Titles you've loved — used as a positive taste signal to refine future recommendations."
         emptyText="Nothing liked yet."
-      />
-      <Section
-        kind="watched"
-        title="✓ Watched"
-        subtitle="Titles you've marked as seen."
-        emptyText="Nothing marked watched yet."
       />
       <Section
         kind="disliked"
