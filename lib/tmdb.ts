@@ -185,22 +185,23 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
   const types: MediaType[] =
     profile.mediaType === "both" ? ["movie", "tv"] : [profile.mediaType];
 
-  const idMaps = new Map<MediaType, Map<number, string>>();
-  for (const type of types) {
-    const nameToId = await genreNameToId(type);
-    const idToName = new Map<number, string>();
-    for (const [name, id] of nameToId) idToName.set(id, name);
-    idMaps.set(type, idToName);
-  }
+  const [idMapsRaw, genreIdsByTypeRaw, keywordIds] = await Promise.all([
+    Promise.all(
+      types.map(async (type) => {
+        const nameToId = await genreNameToId(type);
+        const idToName = new Map<number, string>();
+        for (const [name, id] of nameToId) idToName.set(id, name);
+        return [type, idToName] as const;
+      }),
+    ),
+    Promise.all(
+      types.map(async (type) => [type, await resolveGenreIds(profile.genreNames, type)] as const),
+    ),
+    resolveKeywordIds(profile.keywords ?? []),
+  ]);
 
-  const genreIdsByType = new Map<MediaType, number[]>();
-  for (const type of types) {
-    genreIdsByType.set(type, await resolveGenreIds(profile.genreNames, type));
-  }
-
-  // Resolve keyword IDs so TMDB can filter by content intent (e.g. "true crime",
-  // "murder") — not just broad genre buckets that swallow unrelated titles.
-  const keywordIds = await resolveKeywordIds(profile.keywords ?? []);
+  const idMaps = new Map(idMapsRaw);
+  const genreIdsByType = new Map(genreIdsByTypeRaw);
 
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
@@ -240,60 +241,61 @@ export async function buildCandidatePool(profile: MoodProfile): Promise<Candidat
     (g) => g.toLowerCase() === "documentary",
   );
   if (wantsDocumentary && keywordIds.length > 0) {
-    for (const type of types) {
-      const docIds = await resolveGenreIds(["Documentary"], type);
-      if (docIds.length > 0) {
-        addRaw(
-          await discoverStrand(type, {
-            genreIds: docIds,
-            keywordIds,
-            sortBy: "popularity.desc",
-            voteCountGte: 10,
-            window: eraWindow(type, profile.era, 48),
-          }),
-        );
-      }
-    }
+    const docStrands = await Promise.all(
+      types.map(async (type) => {
+        const docIds = await resolveGenreIds(["Documentary"], type);
+        if (docIds.length === 0) return [];
+        return discoverStrand(type, {
+          genreIds: docIds,
+          keywordIds,
+          sortBy: "popularity.desc",
+          voteCountGte: 10,
+          window: eraWindow(type, profile.era, 48),
+        });
+      }),
+    );
+    docStrands.forEach((s) => addRaw(s));
   }
 
-  for (const type of types) {
-    const genreIds = genreIdsByType.get(type)!;
-    // Buzzing now: most popular recent streaming titles in-genre.
-    addRaw(
-      await discoverStrand(type, {
-        genreIds,
-        keywordIds,
-        sortBy: "popularity.desc",
-        voteCountGte: 50,
-        window: eraWindow(type, profile.era, 24),
-      }),
-    );
-    // Acclaimed recent: best-rated recent streaming titles in-genre.
-    addRaw(
-      await discoverStrand(type, {
-        genreIds,
-        keywordIds,
-        sortBy: "vote_average.desc",
-        voteCountGte: 200,
-        window: eraWindow(type, profile.era, 36),
-      }),
-    );
-  }
+  // Fetch popularity and rating strands in parallel per type
+  const mainStrands = await Promise.all(
+    types.flatMap((type) => {
+      const genreIds = genreIdsByType.get(type)!;
+      return [
+        discoverStrand(type, {
+          genreIds,
+          keywordIds,
+          sortBy: "popularity.desc",
+          voteCountGte: 50,
+          window: eraWindow(type, profile.era, 24),
+        }),
+        discoverStrand(type, {
+          genreIds,
+          keywordIds,
+          sortBy: "vote_average.desc",
+          voteCountGte: 200,
+          window: eraWindow(type, profile.era, 36),
+        }),
+      ];
+    }),
+  );
+  mainStrands.forEach((s) => addRaw(s));
 
   // Sparse genres (e.g. Reality) shrink under strict filters — relax the vote
   // floor and widen the window (still flatrate/streaming) to fill the pool out.
   if (candidates.length < 18) {
-    for (const type of types) {
-      addRaw(
-        await discoverStrand(type, {
+    const fallbackStrands = await Promise.all(
+      types.map((type) =>
+        discoverStrand(type, {
           genreIds: genreIdsByType.get(type)!,
           keywordIds,
           sortBy: "popularity.desc",
           voteCountGte: 10,
           window: eraWindow(type, profile.era, 60),
         }),
-      );
-    }
+      ),
+    );
+    fallbackStrands.forEach((s) => addRaw(s));
   }
 
   return candidates;
