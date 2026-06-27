@@ -196,6 +196,45 @@ export async function nextInterviewStep(history: InterviewTurn[]): Promise<Inter
 }
 
 // ---------------------------------------------------------------------------
+// Free-text intake — translate a natural-language request into a MoodProfile
+// ---------------------------------------------------------------------------
+
+const FREETEXT_SYSTEM_PROMPT = `You are StreamMatch's intake parser. The user typed, in their own words, what they're in the mood to watch tonight. Translate it FAITHFULLY into a structured mood profile that a downstream system will use to pull and curate real, currently-streaming titles. You are NOT recommending titles — just capturing intent.
+
+RULES:
+- mediaType: "movie", "tv", or "both". Infer from their words ("a movie", "a film" → movie; "a show", "a series", "something to binge" → tv). If unclear, use "both".
+- genreNames: standard genre names ONLY, drawn from: Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western, Reality. Include only genres the text clearly implies. Empty array if none are implied.
+- keywords: short, concrete themes/cues pulled from their text (e.g. "heist", "time travel", "true crime", "slow burn", "found family"). Preserve specifics they mention — named franchises, actors, directors, settings, or distinctive vibes.
+- era: "new" (recent/buzzy), "classic" (older/beloved), or "any". Default "any" unless they signal otherwise.
+- toneDescriptors: mood/tone words distilled from their text (e.g. "cozy", "tense", "absurd", "feel-good", "bleak").
+- summary: 1–2 sentences restating EXACTLY what they want tonight, faithful to their spirit and specifics. This is the most important field — the curator leans on it heavily.
+- watchlistMode: set true ONLY if they explicitly ask for something from their saved watchlist / watch-later list; otherwise false.
+- If the text is vague, empty, or a shrug ("I don't know", "whatever", "surprise me", "you pick"), produce an OPEN, crowd-pleasing profile: mediaType "both", genreNames [], keywords [], era "any", toneDescriptors ["crowd-pleasing", "buzzy"], watchlistMode false, and a summary saying they want your best pick from the hottest, most-loved things streaming right now.
+
+Be generous and inclusive — this profile is used to cast a WIDE net, after which a separate curator selects the matches. Return only the structured object.`;
+
+/** Translate a free-text "what I want to watch" request into a MoodProfile. */
+export async function profileFromText(text: string): Promise<MoodProfile> {
+  const response = await client().messages.parse({
+    model: INTERVIEW_MODEL,
+    max_tokens: 1024,
+    system: FREETEXT_SYSTEM_PROMPT,
+    output_config: {
+      format: zodOutputFormat(MoodProfileSchema),
+    },
+    messages: [
+      { role: "user", content: `What the user typed:\n\n"""${text}"""` },
+    ],
+  });
+
+  const parsed = response.parsed_output;
+  if (!parsed) {
+    throw new Error("Could not parse a mood profile from that input");
+  }
+  return parsed as MoodProfile;
+}
+
+// ---------------------------------------------------------------------------
 // Curation selection
 // ---------------------------------------------------------------------------
 

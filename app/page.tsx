@@ -154,6 +154,30 @@ export default function Home() {
     }
   }
 
+  // Default path: user types what they want in natural language. Translate it
+  // to a mood profile, then run the same candidate + curation pipeline.
+  async function quickSearch(text: string) {
+    setPhase("loading");
+    setError(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = (await res.json()) as
+        | { profile: MoodProfile }
+        | { error: string };
+      if (!res.ok || "error" in data) {
+        throw new Error("error" in data ? data.error : "Couldn't understand that");
+      }
+      await curate(data.profile);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+      setPhase("error");
+    }
+  }
+
   function start() {
     setHistory([]);
     setQuestion(null);
@@ -215,7 +239,7 @@ export default function Home() {
     setError(null);
   }
 
-  if (phase === "landing") return <Hero onStart={start} />;
+  if (phase === "landing") return <Hero onSearch={quickSearch} onStart={start} />;
 
   if (phase === "loading") return <Loader />;
 
