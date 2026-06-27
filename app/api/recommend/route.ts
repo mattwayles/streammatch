@@ -38,6 +38,7 @@ function checkDeadline(startTime: number, remainingBudget: number): void {
 export async function POST(req: Request) {
   const requestStart = Date.now();
   const HARD_DEADLINE_MS = 55000; // 55s to stay under 60s function limit
+  const timings: Record<string, number> = {};
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -46,9 +47,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing mood profile" }, { status: 400 });
     }
 
+    timings.start = 0;
     checkDeadline(requestStart, HARD_DEADLINE_MS);
 
     let allCandidates;
+    let candidatePoolStart = Date.now();
     if (profile.watchlistMode) {
       checkDeadline(requestStart, HARD_DEADLINE_MS);
       const watchlistItems = await withTimeout(
@@ -75,10 +78,12 @@ export async function POST(req: Request) {
         "buildCandidatePool",
       );
     }
+    timings.candidatePool = Date.now() - candidatePoolStart;
 
     checkDeadline(requestStart, HARD_DEADLINE_MS);
 
     // Filter out watched, liked (already seen), disliked, and saved watchlist titles.
+    let supabaseStart = Date.now();
     const [watched, disliked, liked, watchlistSet, dislikedList, likedList] = await withTimeout(
       Promise.all([
         getWatchedKeys(),
@@ -91,6 +96,7 @@ export async function POST(req: Request) {
       15000,
       "Supabase operations",
     );
+    timings.supabase = Date.now() - supabaseStart;
 
     checkDeadline(requestStart, HARD_DEADLINE_MS);
 
@@ -136,6 +142,7 @@ export async function POST(req: Request) {
     const timeUntilDeadline = HARD_DEADLINE_MS - (Date.now() - requestStart);
     const llmTimeout = Math.min(20000, Math.max(5000, timeUntilDeadline - 5000));
 
+    let llmStart = Date.now();
     try {
       picks = await withTimeout(
         selectRecommendations(
@@ -149,11 +156,19 @@ export async function POST(req: Request) {
         llmTimeout,
         "selectRecommendations (Anthropic)",
       );
+      timings.llm = Date.now() - llmStart;
     } catch (err) {
+      timings.llm = Date.now() - llmStart;
       console.error(
-        `[selectRecommendations timeout after ${Date.now() - requestStart}ms] returning top candidates:`,
+        `[selectRecommendations failed after ${timings.llm}ms, total elapsed: ${Date.now() - requestStart}ms] returning top candidates. Error:`,
         err,
       );
+      console.error("[TIMING BREAKDOWN]", {
+        candidatePool: timings.candidatePool,
+        supabase: timings.supabase,
+        llm: timings.llm,
+        totalElapsed: Date.now() - requestStart,
+      });
       // Fallback: return top candidates by popularity if LLM times out
       picks = candidates
         .sort((a, b) => b.popularity - a.popularity)
