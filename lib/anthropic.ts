@@ -127,7 +127,7 @@ Tone: engaging, sharp, deeply intuitive. Return only the structured object.`;
 async function parseInterviewWithRetry(
   userContent: string,
   attempt = 1,
-  maxAttempts = 3,
+  maxAttempts = 2,
 ): Promise<InterviewStep> {
   try {
     const response = await client().messages.parse({
@@ -168,7 +168,7 @@ async function parseInterviewWithRetry(
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       return parseInterviewWithRetry(userContent, attempt + 1, maxAttempts);
     }
 
@@ -212,7 +212,7 @@ export interface Candidate {
 async function parseSelectionsWithRetry(
   userContent: string,
   attempt = 1,
-  maxAttempts = 3,
+  maxAttempts = 2,
 ): Promise<Pick[]> {
   try {
     const response = await client().messages.parse({
@@ -248,7 +248,7 @@ async function parseSelectionsWithRetry(
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       return parseSelectionsWithRetry(userContent, attempt + 1, maxAttempts);
     }
 
