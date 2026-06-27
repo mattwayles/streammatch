@@ -209,6 +209,9 @@ export interface Candidate {
   rating: number;
   /** TMDB popularity score — higher = more buzz right now. */
   popularity: number;
+  /** Image URLs carried through to the recommendation; not sent to the model. */
+  posterUrl: string | null;
+  screenshotUrl: string | null;
 }
 
 async function parseSelections(userContent: string): Promise<Pick[]> {
@@ -285,8 +288,21 @@ export async function selectRecommendations(
         .join("\n")}`
     : "";
 
+  // Only send the fields the model needs to choose — omit image URLs, which
+  // would add noise and ~thousands of useless tokens across the pool.
+  const promptCandidates = candidates.map((c) => ({
+    id: c.id,
+    mediaType: c.mediaType,
+    title: c.title,
+    year: c.year,
+    overview: c.overview,
+    genres: c.genres,
+    rating: c.rating,
+    popularity: c.popularity,
+  }));
+
   const userContent = `USER MOOD PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nCANDIDATE TITLES (pick from these only):\n${JSON.stringify(
-    candidates,
+    promptCandidates,
     null,
     2,
   )}${likedBlock}${avoidBlock}${watchedBlock}${watchlistBlock}`;

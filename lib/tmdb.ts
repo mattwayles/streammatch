@@ -132,6 +132,8 @@ interface RawTitle {
   vote_average?: number;
   popularity?: number;
   genre_ids?: number[];
+  poster_path?: string | null;
+  backdrop_path?: string | null;
 }
 
 function yearOf(t: RawTitle): string | null {
@@ -247,6 +249,9 @@ async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candida
         genres,
         rating: Math.round((t.vote_average ?? 0) * 10) / 10,
         popularity: Math.round(t.popularity ?? 0),
+        posterUrl: imageUrl(t.poster_path, "w500"),
+        screenshotUrl:
+          imageUrl(t.backdrop_path, "w1280") ?? imageUrl(t.poster_path, "w500"),
       });
     }
   };
@@ -324,6 +329,8 @@ interface BasicDetailsResponse {
   vote_average?: number;
   popularity?: number;
   genres?: { id: number; name: string }[];
+  poster_path?: string | null;
+  backdrop_path?: string | null;
 }
 
 /**
@@ -353,6 +360,9 @@ export async function buildCandidatesFromIds(
       genres: (d.genres ?? []).map((g) => g.name),
       rating: Math.round((d.vote_average ?? 0) * 10) / 10,
       popularity: Math.round(d.popularity ?? 0),
+      posterUrl: imageUrl(d.poster_path, "w500"),
+      screenshotUrl:
+        imageUrl(d.backdrop_path, "w1280") ?? imageUrl(d.poster_path, "w500"),
     });
   }
   return candidates;
