@@ -121,6 +121,28 @@ RULES:
 
 Tone: engaging, sharp, deeply intuitive. Return only the structured object.`;
 
+// Softer matching criteria used when the first-pass curation returns 0 picks.
+// The candidate pool may have been widened by TMDB fallback logic, so some titles
+// may only loosely align with the mood. The goal is to always surface something.
+const RELAXED_CURATION_SYSTEM_PROMPT = `You are "StreamMatch," an entertainment concierge.
+
+The user wants something to watch tonight. The candidate pool below is the best currently-streaming content available — it may not perfectly match the mood, but it's what's accessible right now.
+
+YOUR GOAL: make sure the user has options. Pick every title that has ANY thematic, tonal, or genre connection to the mood profile — even loosely. Be generous.
+
+RULES:
+- Include a title if it shares a genre, tone, general audience, or any thematic thread with what the user wants. Only exclude something that is an obvious mismatch (e.g. kids' animation when the user asked for adult horror).
+- Never pick titles on the AVOID LIST or anything very similar in premise.
+- Never recommend WATCHLIST titles.
+- Lean toward titles similar to the LIKED LIST if one is provided.
+- RANK from closest match to loosest. First pick is your best available option for this mood.
+- For each pick write:
+  - whyThisFits: one honest sentence connecting it to the mood, even if the fit is approximate.
+  - vibeCheck: a short vibe tag (e.g. "Broadly entertaining", "Good enough for tonight", "Crowd-pleaser").
+- Use exact candidate ids and mediaType values. Never invent titles or ids.
+
+Return only the structured object.`;
+
 // ---------------------------------------------------------------------------
 // Interview turn
 // ---------------------------------------------------------------------------
@@ -353,41 +375,19 @@ function buildCurationUserContent(
   )}${likedBlock}${avoidBlock}${watchlistBlock}`;
 }
 
-/**
- * Streams the curation selection, invoking `onPick` for each pick the moment the
- * model finishes writing it. Picks that fail validation are skipped. The model
- * call is bounded by `deadlineMs`; when it elapses the stream is aborted cleanly
- * and whatever was emitted so far stands.
- *
- * Streaming (rather than awaiting the whole list) means the client renders cards
- * incrementally, so a large result set (60-100) never depends on the full
- * response fitting inside a single request's time budget.
- */
-export async function streamSelections(
-  profile: MoodProfile,
-  candidates: Candidate[],
-  dislikedTitles: string[],
-  likedTitles: string[],
-  watchlistTitles: string[],
+/** Shared streaming runner used by both first-pass and relaxed curation. */
+async function runCurationStream(
+  systemPrompt: string,
+  userContent: string,
   onPick: (pick: Pick) => void,
   deadlineMs: number,
 ): Promise<void> {
-  const userContent = buildCurationUserContent(
-    profile,
-    candidates,
-    dislikedTitles,
-    likedTitles,
-    watchlistTitles,
-  );
-
-  // This is a "select everything that fits from a list" task, so we disable
-  // extended thinking and run at low effort — the dominant cost is the output
-  // tokens for all the picks, not reasoning depth. `max_tokens` is large so a
-  // long list isn't truncated mid-stream.
+  // "Select everything that fits from a list" — disable extended thinking and run
+  // at low effort. Dominant cost is output tokens, not reasoning depth.
   const stream = client().messages.stream({
     model: CURATION_MODEL,
     max_tokens: 32000,
-    system: CURATION_SYSTEM_PROMPT,
+    system: systemPrompt,
     thinking: { type: "disabled" },
     output_config: {
       effort: "low",
@@ -417,6 +417,52 @@ export async function streamSelections(
     // anything else so the route can fall back.
     if (!(err instanceof Anthropic.APIUserAbortError)) throw err;
   }
+}
+
+/**
+ * Streams the curation selection, invoking `onPick` for each pick the moment the
+ * model finishes writing it. Picks that fail validation are skipped. The model
+ * call is bounded by `deadlineMs`; when it elapses the stream is aborted cleanly
+ * and whatever was emitted so far stands.
+ *
+ * Streaming (rather than awaiting the whole list) means the client renders cards
+ * incrementally, so a large result set (60-100) never depends on the full
+ * response fitting inside a single request's time budget.
+ */
+export async function streamSelections(
+  profile: MoodProfile,
+  candidates: Candidate[],
+  dislikedTitles: string[],
+  likedTitles: string[],
+  watchlistTitles: string[],
+  onPick: (pick: Pick) => void,
+  deadlineMs: number,
+): Promise<void> {
+  const userContent = buildCurationUserContent(
+    profile, candidates, dislikedTitles, likedTitles, watchlistTitles,
+  );
+  await runCurationStream(CURATION_SYSTEM_PROMPT, userContent, onPick, deadlineMs);
+}
+
+/**
+ * Relaxed retry — used when the first-pass curation returns 0 picks. Uses a
+ * softer system prompt that lowers the matching bar: include anything with any
+ * thematic overlap rather than requiring a genuine match. Called by the recommend
+ * route when there's still enough time budget remaining after the first pass.
+ */
+export async function streamSelectionsRelaxed(
+  profile: MoodProfile,
+  candidates: Candidate[],
+  dislikedTitles: string[],
+  likedTitles: string[],
+  watchlistTitles: string[],
+  onPick: (pick: Pick) => void,
+  deadlineMs: number,
+): Promise<void> {
+  const userContent = buildCurationUserContent(
+    profile, candidates, dislikedTitles, likedTitles, watchlistTitles,
+  );
+  await runCurationStream(RELAXED_CURATION_SYSTEM_PROMPT, userContent, onPick, deadlineMs);
 }
 
 function safeJsonParse(s: string): unknown {

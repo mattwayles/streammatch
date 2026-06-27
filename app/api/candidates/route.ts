@@ -59,13 +59,22 @@ export async function POST(req: Request) {
       "Supabase operations",
     );
 
-    const candidates = allCandidates.filter((c) => {
+    let candidates = allCandidates.filter((c) => {
       const k = itemKey(c.mediaType, c.id);
       // In watchlist mode keep items regardless of watchlist status — user explicitly saved them.
       if (profile.watchlistMode) return !disliked.has(k);
       // Exclude disliked, liked, and watchlist items from regular recommendations.
       return !disliked.has(k) && !liked.has(k) && !watchlistSet.has(k);
     });
+
+    // If taste-list filtering removed every candidate (user has rated a lot of
+    // content), relax to only block disliked titles. Liked/watchlist items
+    // showing up again is far better than a blank result screen.
+    if (candidates.length === 0 && !profile.watchlistMode) {
+      candidates = allCandidates.filter(
+        (c) => !disliked.has(itemKey(c.mediaType, c.id)),
+      );
+    }
 
     const dislikedTitles = dislikedList
       .map((d) => d.title)

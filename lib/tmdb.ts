@@ -23,6 +23,7 @@ function apiKey(): string {
 async function tmdb<T = Record<string, unknown>>(
   path: string,
   params: Record<string, string | number | undefined> = {},
+  retries = 2,
 ): Promise<T> {
   const url = new URL(`${TMDB_BASE}${path}`);
   url.searchParams.set("api_key", apiKey());
@@ -30,12 +31,24 @@ async function tmdb<T = Record<string, unknown>>(
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
   }
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) {
+
+  let lastErr: Error | undefined;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 400 * attempt));
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { Accept: "application/json" } });
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      continue;
+    }
+    if (res.ok) return (await res.json()) as T;
+    // Retry on transient server errors; bail immediately on client errors.
     const body = await res.text().catch(() => "");
-    throw new Error(`TMDB ${path} failed: ${res.status} ${body.slice(0, 200)}`);
+    lastErr = new Error(`TMDB ${path} failed: ${res.status} ${body.slice(0, 200)}`);
+    if (res.status < 500) throw lastErr;
   }
-  return (await res.json()) as T;
+  throw lastErr!;
 }
 
 export function imageUrl(path: string | null | undefined, size: string): string | null {
@@ -55,7 +68,15 @@ const genreCache = new Map<MediaType, Map<string, number>>();
 async function genreNameToId(type: MediaType): Promise<Map<string, number>> {
   const cached = genreCache.get(type);
   if (cached) return cached;
-  const data = await tmdb<GenreList>(`/genre/${type}/list`);
+  let data: GenreList;
+  try {
+    data = await tmdb<GenreList>(`/genre/${type}/list`);
+  } catch (e) {
+    // Degrade gracefully: return an empty map so discover calls still run
+    // without a genre filter rather than crashing the whole candidate build.
+    console.warn(`[tmdb] genre list unavailable for ${type}, proceeding without genre filter:`, e);
+    return new Map();
+  }
   const map = new Map<string, number>();
   for (const g of data.genres) map.set(g.name.toLowerCase(), g.id);
   genreCache.set(type, map);
@@ -181,7 +202,7 @@ interface StrandOpts {
 /** One discover query, restricted to titles currently available on streaming (flatrate). */
 async function discoverStrand(type: MediaType, opts: StrandOpts): Promise<RawTitle[]> {
   const pages = Math.max(1, opts.pages ?? 1);
-  const pageResults = await Promise.all(
+  const pageResults = await Promise.allSettled(
     Array.from({ length: pages }, (_, i) =>
       tmdb<{ results: RawTitle[] }>(`/discover/${type}`, {
         sort_by: opts.sortBy,
@@ -199,7 +220,15 @@ async function discoverStrand(type: MediaType, opts: StrandOpts): Promise<RawTit
       }),
     ),
   );
-  return pageResults.flatMap((d) => d.results).map((r) => ({ ...r, media_type: type }));
+  return pageResults
+    .flatMap((r) => {
+      if (r.status === "rejected") {
+        console.warn("[tmdb] discover page failed, skipping:", r.reason);
+        return [];
+      }
+      return r.value.results;
+    })
+    .map((r) => ({ ...r, media_type: type }));
 }
 
 /**
@@ -303,6 +332,40 @@ async function buildCandidatePoolUncached(profile: MoodProfile): Promise<Candida
     }),
   );
   mainStrands.forEach((s) => addRaw(s));
+
+  // Fallback level 1: keyword filter can over-constrain (e.g. "true crime" + flatrate
+  // streaming returns 0 TMDB results). Drop keywords but keep genres and widen the window.
+  if (candidates.length === 0 && keywordIds.length > 0) {
+    const relaxedStrands = await Promise.all(
+      types.map((type) =>
+        discoverStrand(type, {
+          genreIds: genreIdsByType.get(type)!,
+          sortBy: "popularity.desc",
+          voteCountGte: 20,
+          window: eraWindow(type, profile.era === "classic" ? "classic" : "any", 48),
+          pages: 2,
+        }),
+      ),
+    );
+    relaxedStrands.forEach((s) => addRaw(s));
+  }
+
+  // Fallback level 2: genre filter is also too tight (e.g. niche genre on flatrate).
+  // Fetch popular streaming content with no constraints so results are never empty.
+  if (candidates.length === 0) {
+    const broadStrands = await Promise.all(
+      types.map((type) =>
+        discoverStrand(type, {
+          genreIds: [],
+          sortBy: "popularity.desc",
+          voteCountGte: 100,
+          window: eraWindow(type, "any", 36),
+          pages: 2,
+        }),
+      ),
+    );
+    broadStrands.forEach((s) => addRaw(s));
+  }
 
   return candidates;
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { streamSelections } from "@/lib/anthropic";
+import { streamSelections, streamSelectionsRelaxed } from "@/lib/anthropic";
 import type { Candidate, Pick } from "@/lib/anthropic";
 import type { MoodProfile, Recommendation } from "@/lib/types";
 
@@ -77,13 +77,18 @@ export async function POST(req: Request) {
         emitted++;
       };
 
+      const selectionStart = Date.now();
+      const dislikedTitles = body.dislikedTitles ?? [];
+      const likedTitles = body.likedTitles ?? [];
+      const watchlistTitles = body.watchlistTitles ?? [];
+
       try {
         await streamSelections(
           profile,
           candidates,
-          body.dislikedTitles ?? [],
-          body.likedTitles ?? [],
-          body.watchlistTitles ?? [],
+          dislikedTitles,
+          likedTitles,
+          watchlistTitles,
           emitPick,
           SELECTION_DEADLINE_MS,
         );
@@ -91,8 +96,30 @@ export async function POST(req: Request) {
         console.error("[/api/recommend] selection stream failed:", err);
       }
 
-      // Nothing usable from the model — fall back to popularity so the user
-      // still gets a full set of results.
+      // First pass returned nothing — retry with a softer matching bar before
+      // giving up. The relaxed prompt picks anything with any thematic overlap,
+      // so it should always surface candidates when the pool is non-empty.
+      if (emitted === 0) {
+        const elapsed = Date.now() - selectionStart;
+        const remainingMs = SELECTION_DEADLINE_MS - elapsed - 2000; // 2 s platform buffer
+        if (remainingMs > 6000) {
+          try {
+            await streamSelectionsRelaxed(
+              profile,
+              candidates,
+              dislikedTitles,
+              likedTitles,
+              watchlistTitles,
+              emitPick,
+              remainingMs,
+            );
+          } catch (err) {
+            console.error("[/api/recommend] relaxed selection stream failed:", err);
+          }
+        }
+      }
+
+      // Absolute last resort: sort by popularity so the user always sees results.
       if (emitted === 0) {
         const fallback = [...candidates]
           .sort((a, b) => b.popularity - a.popularity)
