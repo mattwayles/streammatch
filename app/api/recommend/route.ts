@@ -5,6 +5,7 @@ import {
   getDislikedKeys,
   getLikedKeys,
   getWatchedKeys,
+  getWatchlistKeys,
   listDisliked,
   listLiked,
   listWatchlist,
@@ -37,20 +38,22 @@ export async function POST(req: Request) {
       allCandidates = await buildCandidatePool(profile);
     }
 
-    // Filter out watched, liked (already seen), and disliked titles.
-    const [watched, disliked, liked, dislikedList, likedList] = await Promise.all([
+    // Filter out watched, liked (already seen), disliked, and saved watchlist titles.
+    const [watched, disliked, liked, watchlistSet, dislikedList, likedList] = await Promise.all([
       getWatchedKeys(),
       getDislikedKeys(),
       getLikedKeys(),
+      getWatchlistKeys(),
       listDisliked(),
       listLiked(),
     ]);
 
     const candidates = allCandidates.filter((c) => {
       const k = watchedKey(c.mediaType, c.id);
-      // In watchlist mode keep items regardless of watched status — user explicitly saved them.
+      // In watchlist mode keep items regardless of watched/watchlist status — user explicitly saved them.
       if (profile.watchlistMode) return !disliked.has(k);
-      return !watched.has(k) && !disliked.has(k) && !liked.has(k);
+      // Exclude watched, disliked, liked, and watchlist items from regular recommendations.
+      return !watched.has(k) && !disliked.has(k) && !liked.has(k) && !watchlistSet.has(k);
     });
 
     if (candidates.length === 0) {
