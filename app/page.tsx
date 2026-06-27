@@ -54,21 +54,49 @@ export default function Home() {
   async function curate(profile: MoodProfile) {
     setPhase("loading");
     try {
-      const res = await fetch("/api/recommend", {
+      // Step 1: build the candidate pool + taste context (TMDB + Supabase).
+      const candRes = await fetch("/api/candidates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile }),
       });
-      const data = (await res.json()) as
-        | { recommendations: Recommendation[]; watchlistEmpty?: boolean }
+      const candData = (await candRes.json()) as
+        | {
+            candidates: unknown[];
+            watchlistEmpty?: boolean;
+            dislikedTitles: string[];
+            likedTitles: string[];
+            watchedTitles: string[];
+            watchlistTitles: string[];
+          }
         | { error: string };
-      if (!res.ok || "error" in data) {
-        throw new Error("error" in data ? data.error : "Recommendation request failed");
+      if (!candRes.ok || "error" in candData) {
+        throw new Error(
+          "error" in candData ? candData.error : "Failed to load candidates",
+        );
       }
-      if ("watchlistEmpty" in data && data.watchlistEmpty) {
+      if (candData.watchlistEmpty) {
         throw new Error(
           "Your watch list is empty. Add titles with the 🔖 Watch Later button first.",
         );
+      }
+      if (!candData.candidates.length) {
+        setRecs([]);
+        setPhase("results");
+        return;
+      }
+
+      // Step 2: LLM curation only — fast, isolated, gets its own time budget.
+      const res = await fetch("/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile, ...candData }),
+      });
+      const data = (await res.json()) as
+        | { recommendations: Recommendation[] }
+        | { error: string };
+      if (!res.ok || "error" in data) {
+        throw new Error("error" in data ? data.error : "Recommendation request failed");
       }
       setRecs(data.recommendations);
       setPhase("results");
