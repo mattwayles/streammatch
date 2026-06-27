@@ -129,25 +129,29 @@ export async function POST(req: Request) {
     const validKeys = new Set(candidates.map((c) => `${c.mediaType}:${c.id}`));
     const valid = picks.filter((p) => validKeys.has(`${p.mediaType}:${p.id}`));
 
-    // Enrich in batches to avoid overwhelming TMDB and to be deadline-aware.
-    // Batch size of 5 to keep latency reasonable. Total budget: 30s.
-    const recommendations: Recommendation[] = [];
-    const batchSize = 5;
-    const enrichmentTimeoutPerBatch = 4000;
-    for (let i = 0; i < valid.length; i += batchSize) {
-      try {
-        const batch = valid.slice(i, i + batchSize);
-        const settled = await withTimeout(
-          Promise.all(batch.map((p) => enrich(p))),
-          enrichmentTimeoutPerBatch,
-          `enrichBatch[${i}-${i + batch.length}]`,
-        );
-        recommendations.push(...settled.filter((r): r is Recommendation => r !== null));
-      } catch (err) {
-        console.error(`[enrich batch] timeout or error: ${err}`);
-        break;
-      }
-    }
+    // Map picks to recommendations using candidate data (no enrichment to stay under 60s timeout).
+    // Enrichment (providers, reviews, screenshots) happens client-side or in background.
+    const recommendations: Recommendation[] = valid
+      .map((pick) => {
+        const candidate = candidates.find((c) => c.id === pick.id && c.mediaType === pick.mediaType);
+        if (!candidate) return null;
+        return {
+          id: candidate.id,
+          mediaType: candidate.mediaType,
+          title: candidate.title,
+          year: candidate.year,
+          description: candidate.overview,
+          rating: candidate.rating,
+          voteCount: 0,
+          screenshotUrl: null,
+          posterUrl: null,
+          providers: [],
+          reviews: [],
+          whyThisFits: pick.whyThisFits,
+          vibeCheck: pick.vibeCheck,
+        };
+      })
+      .filter((r): r is Recommendation => r !== null);
 
     return NextResponse.json({ recommendations });
   } catch (err) {

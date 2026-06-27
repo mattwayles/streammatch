@@ -35,8 +35,11 @@ export default function ResultCard({
             loading="lazy"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/30">
-            No image
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-ink-700 to-ink-900">
+            <div className="text-center">
+              <p className="text-3xl font-bold text-glow/40 mb-2">{rec.title.charAt(0)}</p>
+              <p className="text-xs text-white/20">Loading...</p>
+            </div>
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-ink-900 via-ink-900/30 to-transparent" />
@@ -65,11 +68,13 @@ export default function ResultCard({
             <span className="text-lg font-bold text-glow-soft">
               ★ {rec.rating.toFixed(1)}
             </span>
-            <span className="text-xs text-white/40">
-              {rec.voteCount.toLocaleString()} ratings
-            </span>
+            {rec.voteCount > 0 && (
+              <span className="text-xs text-white/40">
+                {rec.voteCount.toLocaleString()} ratings
+              </span>
+            )}
           </div>
-          <ProviderBadges providers={rec.providers} />
+          {rec.providers.length > 0 && <ProviderBadges providers={rec.providers} />}
         </div>
 
         <div>
@@ -82,12 +87,14 @@ export default function ResultCard({
         <p className="text-sm leading-relaxed text-white/55">{rec.description}</p>
 
         <div className="space-y-2">
-          <button
-            onClick={() => setShowReviews((s) => !s)}
-            className="text-sm font-medium text-glow-soft hover:underline"
-          >
-            {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
-          </button>
+          {rec.reviews.length > 0 && (
+            <button
+              onClick={() => setShowReviews((s) => !s)}
+              className="text-sm font-medium text-glow-soft hover:underline"
+            >
+              {showReviews ? "Hide viewer reviews" : "Viewer reviews"}
+            </button>
+          )}
           <div className="flex gap-2">
             <button
               onClick={() => {
@@ -123,7 +130,7 @@ export default function ResultCard({
             </button>
           </div>
         </div>
-        {showReviews && (
+        {showReviews && rec.reviews.length > 0 && (
           <div>
             <ReviewList reviews={rec.reviews} />
           </div>
