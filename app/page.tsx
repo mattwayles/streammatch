@@ -7,6 +7,7 @@ import QuestionCard from "@/components/QuestionCard";
 import Loader from "@/components/Loader";
 import ResultCard from "@/components/ResultCard";
 import RotatingMessage from "@/components/RotatingMessage";
+import { ToastStack, useToasts } from "@/components/Toast";
 import { INTERVIEW_PHRASES } from "@/lib/phrases";
 import type {
   InterviewStep,
@@ -43,6 +44,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [recs, setRecs] = useState<Recommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { toasts, notify } = useToasts();
 
   async function fetchStep(nextHistory: InterviewTurn[]) {
     setBusy(true);
@@ -244,7 +246,7 @@ export default function Home() {
 
   async function addToWatchlist(rec: Recommendation) {
     try {
-      await fetch("/api/watchlist", {
+      const res = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -258,8 +260,22 @@ export default function Home() {
           year: rec.year,
         }),
       });
-    } catch {
-      // Non-fatal.
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      notify(
+        data.nuvio === "synced"
+          ? `🔖 "${rec.title}" added to your watchlist and synced to Nuvio`
+          : data.nuvio === "failed"
+            ? `🔖 "${rec.title}" added to your watchlist (Nuvio sync failed)`
+            : `🔖 "${rec.title}" added to your watchlist`,
+      );
+    } catch (e) {
+      notify(
+        `Couldn't add "${rec.title}" to your watchlist — ${
+          e instanceof Error ? e.message : "please try again"
+        }`,
+        "error",
+      );
     }
   }
 
@@ -315,6 +331,7 @@ export default function Home() {
   // results
   return (
     <main className="mx-auto max-w-6xl px-6 py-16">
+      <ToastStack toasts={toasts} />
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-2 text-sm font-medium uppercase tracking-[0.25em] text-glow-soft">

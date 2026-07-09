@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ResultCard from "@/components/ResultCard";
+import { ToastStack, useToasts } from "@/components/Toast";
 import type { Recommendation, SearchResult } from "@/lib/types";
 
 const DEBOUNCE_MS = 400;
@@ -14,6 +15,7 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [hideWatchlist, setHideWatchlist] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const { toasts, notify } = useToasts();
 
   // Debounced fetch — empty query browses the most popular titles.
   useEffect(() => {
@@ -62,13 +64,15 @@ export default function SearchPage() {
   }
 
   async function addToWatchlist(rec: Recommendation) {
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === rec.id && i.mediaType === rec.mediaType ? { ...i, inWatchlist: true } : i,
-      ),
-    );
+    const setInWatchlist = (value: boolean) =>
+      setItems((prev) =>
+        prev.map((i) =>
+          i.id === rec.id && i.mediaType === rec.mediaType ? { ...i, inWatchlist: value } : i,
+        ),
+      );
+    setInWatchlist(true);
     try {
-      await fetch("/api/watchlist", {
+      const res = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -81,8 +85,23 @@ export default function SearchPage() {
           year: rec.year,
         }),
       });
-    } catch {
-      // Non-fatal.
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      notify(
+        data.nuvio === "synced"
+          ? `🔖 "${rec.title}" added to your watchlist and synced to Nuvio`
+          : data.nuvio === "failed"
+            ? `🔖 "${rec.title}" added to your watchlist (Nuvio sync failed)`
+            : `🔖 "${rec.title}" added to your watchlist`,
+      );
+    } catch (e) {
+      setInWatchlist(false);
+      notify(
+        `Couldn't add "${rec.title}" to your watchlist — ${
+          e instanceof Error ? e.message : "please try again"
+        }`,
+        "error",
+      );
     }
   }
 
@@ -95,7 +114,9 @@ export default function SearchPage() {
     <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
       {list.map((item) => (
         <ResultCard
-          key={`${item.mediaType}-${item.id}`}
+          // inWatchlist is part of the key so a failed save (which reverts the
+          // flag) remounts the card and re-enables its internal Saved state.
+          key={`${item.mediaType}-${item.id}-${item.inWatchlist}`}
           rec={item}
           inWatchlist={item.inWatchlist}
           onDisliked={(rec) => hideAndPost(rec, "/api/disliked")}
@@ -108,6 +129,7 @@ export default function SearchPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-16">
+      <ToastStack toasts={toasts} />
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-2 text-sm font-medium uppercase tracking-[0.25em] text-glow-soft">
