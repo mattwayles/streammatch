@@ -118,10 +118,12 @@ export default function SearchPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save");
+      const extras = [
+        data.watchlistRemoved ? "removed from your watchlist" : null,
+        data.nuvioWatched === "synced" ? "marked watched on Nuvio" : null,
+      ].filter(Boolean);
       notify(
-        data.watchlistRemoved
-          ? `${emoji} Marked "${rec.title}" as ${kind} — removed from your watchlist`
-          : `${emoji} Marked "${rec.title}" as ${kind}`,
+        `${emoji} Marked "${rec.title}" as ${kind}${extras.length ? ` — ${extras.join(" · ")}` : ""}`,
       );
     } catch (e) {
       updateItem(rec, { sentiment: prev?.sentiment ?? null, inWatchlist: prev?.inWatchlist ?? false });

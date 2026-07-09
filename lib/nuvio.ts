@@ -197,6 +197,33 @@ export interface NuvioAddEntry {
   releaseInfo?: string | null;
 }
 
+export interface NuvioWatchedEntry {
+  tmdbId: number;
+  mediaType: MediaType;
+  title: string;
+  imdbId?: string | null;
+}
+
+/**
+ * Record a title in Nuvio's watch history. The endpoint is a non-destructive
+ * merge, so this is a single upsert with no pull required. Prefers the IMDb id
+ * — the scheme Nuvio's own clients write — so the entry dedupes against
+ * history created inside Nuvio.
+ */
+export async function markWatchedOnNuvio(entry: NuvioWatchedEntry): Promise<void> {
+  await rpc<void>("sync_push_watched_items", {
+    p_profile_id: profileId(),
+    p_items: [
+      {
+        content_id: entry.imdbId || `tmdb:${entry.tmdbId}`,
+        content_type: entry.mediaType === "tv" ? "series" : "movie",
+        title: entry.title || undefined,
+        watched_at: Date.now(),
+      },
+    ],
+  });
+}
+
 /**
  * Remove one title from the Nuvio library (full-replace push of the filtered
  * list). Items imported from Nuvio are keyed by IMDb id rather than tmdb:, so

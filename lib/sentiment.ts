@@ -1,4 +1,4 @@
-import { isNuvioSyncEnabled, removeFromNuvioLibrary } from "./nuvio";
+import { isNuvioSyncEnabled, markWatchedOnNuvio, removeFromNuvioLibrary } from "./nuvio";
 import {
   getWatchlistKeys,
   itemKey,
@@ -18,13 +18,17 @@ export interface SentimentResult {
   watchlistRemoved: boolean;
   /** Outcome of the Nuvio library removal (only attempted when it was on the watchlist). */
   nuvio: "removed" | "skipped" | "failed";
+  /** Outcome of recording the title in Nuvio's watch history. */
+  nuvioWatched: "synced" | "skipped" | "failed";
 }
 
 /**
  * Record a liked/disliked sentiment while enforcing list exclusivity: a title
  * lives in at most one of watchlist / liked / disliked. Marking a sentiment
- * clears the opposite sentiment, pulls the title off the watchlist, and — when
- * Nuvio sync is enabled — removes it from the Nuvio library (best-effort).
+ * clears the opposite sentiment and pulls the title off the watchlist. When
+ * Nuvio sync is enabled, rating also records the title in Nuvio's watch
+ * history (rating implies it was watched) and removes it from the Nuvio
+ * library if it was on the watchlist — both best-effort.
  */
 export async function recordSentiment(
   kind: Sentiment,
@@ -45,15 +49,28 @@ export async function recordSentiment(
   if (wasOnWatchlist) await unmarkWatchlist(tmdbId, mediaType);
 
   let nuvio: SentimentResult["nuvio"] = "skipped";
-  if (wasOnWatchlist && (await isNuvioSyncEnabled())) {
+  let nuvioWatched: SentimentResult["nuvioWatched"] = "skipped";
+  if (await isNuvioSyncEnabled()) {
+    const imdbId = await imdbIdFor(mediaType, tmdbId);
+
+    // Rating implies the title has been watched — record it in Nuvio history.
     try {
-      const imdbId = await imdbIdFor(mediaType, tmdbId);
-      nuvio = (await removeFromNuvioLibrary(tmdbId, mediaType, imdbId)) ? "removed" : "skipped";
+      await markWatchedOnNuvio({ tmdbId, mediaType, title, imdbId });
+      nuvioWatched = "synced";
     } catch (err) {
-      console.error(`[sentiment] Nuvio removal failed for ${mediaType}:${tmdbId}:`, err);
-      nuvio = "failed";
+      console.error(`[sentiment] Nuvio watched push failed for ${mediaType}:${tmdbId}:`, err);
+      nuvioWatched = "failed";
+    }
+
+    if (wasOnWatchlist) {
+      try {
+        nuvio = (await removeFromNuvioLibrary(tmdbId, mediaType, imdbId)) ? "removed" : "skipped";
+      } catch (err) {
+        console.error(`[sentiment] Nuvio removal failed for ${mediaType}:${tmdbId}:`, err);
+        nuvio = "failed";
+      }
     }
   }
 
-  return { watchlistRemoved: wasOnWatchlist, nuvio };
+  return { watchlistRemoved: wasOnWatchlist, nuvio, nuvioWatched };
 }
