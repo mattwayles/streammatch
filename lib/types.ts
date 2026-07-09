@@ -68,6 +68,8 @@ export interface Provider {
 export interface SearchResult extends Recommendation {
   /** Already on the user's watchlist (drives the disabled Watch Later state). */
   inWatchlist: boolean;
+  /** Existing rating for this title, if any (disables the matching button). */
+  sentiment: "liked" | "disliked" | null;
   /** True when surfaced from "more like this" rather than a direct query match. */
   related: boolean;
 }

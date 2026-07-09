@@ -4,6 +4,8 @@ import {
   isConfigured,
   listWatchlist,
   markWatchlist,
+  unmarkDisliked,
+  unmarkLiked,
   unmarkWatchlist,
   updateWatchlistPosters,
 } from "@/lib/supabase";
@@ -60,6 +62,9 @@ export async function POST(req: Request) {
 
     const poster = typeof body?.poster === "string" ? body.poster : null;
     await markWatchlist(tmdbId, mediaType, title, poster);
+    // Exclusivity: a title lives in at most one of watchlist/liked/disliked.
+    // Last action wins, so saving for later clears any prior sentiment.
+    await Promise.all([unmarkLiked(tmdbId, mediaType), unmarkDisliked(tmdbId, mediaType)]);
 
     // Mirror the new item to the Nuvio library (when configured and enabled in
     // Settings). Best-effort: a Nuvio outage must never block the local save.

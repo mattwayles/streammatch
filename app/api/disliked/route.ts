@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { isConfigured, listDisliked, markDisliked, unmarkDisliked } from "@/lib/supabase";
+import { recordSentiment } from "@/lib/sentiment";
+import { isConfigured, listDisliked, unmarkDisliked } from "@/lib/supabase";
 import type { MediaType } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET() {
   try {
@@ -26,8 +28,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid tmdbId or mediaType" }, { status: 400 });
     }
 
-    await markDisliked(tmdbId, mediaType, title);
-    return NextResponse.json({ ok: true });
+    const result = await recordSentiment("disliked", tmdbId, mediaType, title);
+    return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     console.error("[/api/disliked POST]", err);
     const message = err instanceof Error ? err.message : "Unknown error";

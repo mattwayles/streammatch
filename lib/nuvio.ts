@@ -198,6 +198,35 @@ export interface NuvioAddEntry {
 }
 
 /**
+ * Remove one title from the Nuvio library (full-replace push of the filtered
+ * list). Items imported from Nuvio are keyed by IMDb id rather than tmdb:, so
+ * pass `imdbId` when known to match those too. Returns false when nothing in
+ * the library matched.
+ */
+export async function removeFromNuvioLibrary(
+  tmdbId: number,
+  mediaType: MediaType,
+  imdbId?: string | null,
+): Promise<boolean> {
+  const library = await pullNuvioLibrary();
+  const contentType = mediaType === "tv" ? "series" : "movie";
+  const ids = new Set([`tmdb:${tmdbId}`]);
+  if (imdbId) {
+    ids.add(imdbId);
+    ids.add(`imdb:${imdbId}`);
+  }
+  const filtered = library.filter(
+    (i) => !(ids.has(i.content_id) && i.content_type === contentType),
+  );
+  if (filtered.length === library.length) return false;
+  await rpc<void>("sync_push_library", {
+    p_profile_id: profileId(),
+    p_items: filtered.map(toPushItem),
+  });
+  return true;
+}
+
+/**
  * Add one title to the Nuvio library. The push endpoint is full-replace, so
  * this pulls the complete current library, appends, and pushes it all back.
  * Returns false (without pushing) when the title is already in the library.

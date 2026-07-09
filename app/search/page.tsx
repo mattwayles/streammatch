@@ -19,6 +19,9 @@ export default function SearchPage() {
   const [mode, setMode] = useState<BrowseMode>("popular");
   const [error, setError] = useState<string | null>(null);
   const [hideWatchlist, setHideWatchlist] = useState(false);
+  // Hidden by default: the browse feed is a recommendations surface, so
+  // already-rated titles only appear when explicitly asked for.
+  const [hideRated, setHideRated] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
   const pageRef = useRef(1);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -96,31 +99,43 @@ export default function SearchPage() {
     return () => observer.disconnect();
   }, []);
 
-  const removeItem = (rec: Recommendation) =>
+  const updateItem = (rec: Recommendation, patch: Partial<SearchResult>) =>
     setItems((prev) =>
-      prev.filter((i) => !(i.id === rec.id && i.mediaType === rec.mediaType)),
+      prev.map((i) => (i.id === rec.id && i.mediaType === rec.mediaType ? { ...i, ...patch } : i)),
     );
 
-  async function hideAndPost(rec: Recommendation, endpoint: string) {
-    removeItem(rec);
+  // Rate a title (or switch an existing rating). The server enforces list
+  // exclusivity: rating removes the title from the watchlist (and Nuvio).
+  async function setSentiment(rec: Recommendation, kind: "liked" | "disliked") {
+    const prev = items.find((i) => i.id === rec.id && i.mediaType === rec.mediaType);
+    updateItem(rec, { sentiment: kind, inWatchlist: false });
+    const emoji = kind === "liked" ? "👍" : "👎";
     try {
-      await fetch(endpoint, {
+      const res = await fetch(kind === "liked" ? "/api/liked" : "/api/disliked", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tmdbId: rec.id, mediaType: rec.mediaType, title: rec.title }),
       });
-    } catch {
-      // Non-fatal: it's hidden locally even if persistence failed.
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      notify(
+        data.watchlistRemoved
+          ? `${emoji} Marked "${rec.title}" as ${kind} — removed from your watchlist`
+          : `${emoji} Marked "${rec.title}" as ${kind}`,
+      );
+    } catch (e) {
+      updateItem(rec, { sentiment: prev?.sentiment ?? null, inWatchlist: prev?.inWatchlist ?? false });
+      notify(
+        `Couldn't mark "${rec.title}" as ${kind} — ${
+          e instanceof Error ? e.message : "please try again"
+        }`,
+        "error",
+      );
     }
   }
 
   async function addToWatchlist(rec: Recommendation) {
-    const setInWatchlist = (value: boolean) =>
-      setItems((prev) =>
-        prev.map((i) =>
-          i.id === rec.id && i.mediaType === rec.mediaType ? { ...i, inWatchlist: value } : i,
-        ),
-      );
+    const setInWatchlist = (value: boolean) => updateItem(rec, { inWatchlist: value });
     setInWatchlist(true);
     try {
       const res = await fetch("/api/watchlist", {
@@ -156,7 +171,9 @@ export default function SearchPage() {
     }
   }
 
-  const visible = hideWatchlist ? items.filter((i) => !i.inWatchlist) : items;
+  const visible = items.filter(
+    (i) => !(hideWatchlist && i.inWatchlist) && !(hideRated && i.sentiment),
+  );
   const matches = visible.filter((i) => !i.related);
   const related = visible.filter((i) => i.related);
   const searching = query.trim().length > 0;
@@ -170,8 +187,9 @@ export default function SearchPage() {
           key={`${item.mediaType}-${item.id}-${item.inWatchlist}`}
           rec={item}
           inWatchlist={item.inWatchlist}
-          onDisliked={(rec) => hideAndPost(rec, "/api/disliked")}
-          onLiked={(rec) => hideAndPost(rec, "/api/liked")}
+          sentiment={item.sentiment}
+          onDisliked={(rec) => setSentiment(rec, "disliked")}
+          onLiked={(rec) => setSentiment(rec, "liked")}
           onWatchlist={addToWatchlist}
         />
       ))}
@@ -224,6 +242,15 @@ export default function SearchPage() {
           />
           Hide Watchlist
         </label>
+        <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-white/70">
+          <input
+            type="checkbox"
+            checked={hideRated}
+            onChange={(e) => setHideRated(e.target.checked)}
+            className="h-4 w-4 accent-white"
+          />
+          Hide Liked/Disliked
+        </label>
       </div>
 
       {loading ? (
@@ -236,7 +263,7 @@ export default function SearchPage() {
         <div className="glass rounded-3xl p-12 text-center">
           <p className="text-white/70">
             {items.length > 0
-              ? "Everything matching is already on your watchlist."
+              ? "Everything here is already on your lists — uncheck the filters above to see it."
               : "No matches found. Try a different title."}
           </p>
         </div>

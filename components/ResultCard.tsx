@@ -11,6 +11,7 @@ export default function ResultCard({
   onLiked,
   onWatchlist,
   inWatchlist = false,
+  sentiment = null,
 }: {
   rec: Recommendation;
   onDisliked: (rec: Recommendation) => void;
@@ -18,6 +19,10 @@ export default function ResultCard({
   onWatchlist: (rec: Recommendation) => void;
   /** Already on the watchlist — renders a disabled Watch Later button. */
   inWatchlist?: boolean;
+  /** Existing rating. Disables the matching button (the opposite one stays
+   * active to allow switching) and hides Watch Later — a rated title can't
+   * also be on the watchlist. */
+  sentiment?: "liked" | "disliked" | null;
 }) {
   const [showReviews, setShowReviews] = useState(false);
   const [savedToWatchlist, setSavedToWatchlist] = useState(false);
@@ -106,34 +111,46 @@ export default function ResultCard({
             </button>
           )}
           <div className="flex gap-2">
+            {!sentiment && (
+              <button
+                onClick={() => {
+                  setSavedToWatchlist(true);
+                  onWatchlist(rec);
+                }}
+                disabled={inWatchlist || savedToWatchlist}
+                title={
+                  inWatchlist
+                    ? "This title is already on your watch list"
+                    : "Save to your watch list for later"
+                }
+                className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
+              >
+                {watchlistLabel}
+              </button>
+            )}
             <button
-              onClick={() => {
-                setSavedToWatchlist(true);
-                onWatchlist(rec);
-              }}
-              disabled={inWatchlist || savedToWatchlist}
+              onClick={() => onDisliked(rec)}
+              disabled={sentiment === "disliked"}
               title={
-                inWatchlist
-                  ? "This title is already on your watch list"
-                  : "Save to your watch list for later"
+                sentiment === "disliked"
+                  ? "Already marked as disliked"
+                  : "Not for me — hide it and refine future suggestions away from this"
               }
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
             >
-              {watchlistLabel}
-            </button>
-            <button
-              onClick={() => onDisliked(rec)}
-              title="Not for me — hide it and refine future suggestions away from this"
-              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
-            >
-              👎 Not for me
+              {sentiment === "disliked" ? "👎 Disliked" : "👎 Not for me"}
             </button>
             <button
               onClick={() => onLiked(rec)}
-              title="Loved it — refine future suggestions toward more like this"
-              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80"
+              disabled={sentiment === "liked"}
+              title={
+                sentiment === "liked"
+                  ? "Already marked as liked"
+                  : "Loved it — refine future suggestions toward more like this"
+              }
+              className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
             >
-              👍 Liked it
+              {sentiment === "liked" ? "👍 Liked" : "👍 Liked it"}
             </button>
           </div>
         </div>

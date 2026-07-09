@@ -196,8 +196,9 @@ function diversifyByGenre(candidates: ScoredCandidate[]): ScoredCandidate[] {
 /**
  * Personalized browse feed: TMDB "more like this" seeded from the user's
  * entire watchlist and liked list, down-ranked by anything associated with
- * their disliked titles. Liked/disliked titles themselves are excluded, and
- * the final order is genre-diversified so no single genre floods the feed.
+ * their disliked titles. Already-rated titles stay in the pool — the client
+ * annotates and (by default) hides them — and the final order is
+ * genre-diversified so no single genre floods the feed.
  */
 export async function curatedFeed(opts: {
   liked: SeedRef[];
@@ -221,9 +222,6 @@ export async function curatedFeed(opts: {
   if (cached && cached.expires > Date.now()) {
     pool = cached.pool;
   } else {
-    const exclude = new Set(
-      [...opts.liked, ...opts.disliked].map((s) => `${s.mediaType}:${s.tmdbId}`),
-    );
     const scored = new Map<string, ScoredCandidate>();
     // One TMDB call per seed, in bounded batches to respect rate limits.
     const lists: RawSearchTitle[][] = [];
@@ -239,7 +237,6 @@ export async function curatedFeed(opts: {
       for (const t of results) {
         const type: MediaType = t.media_type === "tv" ? "tv" : "movie";
         const key = `${type}:${t.id}`;
-        if (exclude.has(key)) continue;
         const entry = scored.get(key) ?? { t, type, score: 0 };
         entry.score += weight;
         scored.set(key, entry);
@@ -308,6 +305,16 @@ export async function searchTitles(
   }
 
   return out;
+}
+
+/** Look up a title's IMDb id (e.g. "tt0137523"). Null when unknown. */
+export async function imdbIdFor(mediaType: MediaType, tmdbId: number): Promise<string | null> {
+  try {
+    const d = await tmdb<{ imdb_id?: string | null }>(`/${mediaType}/${tmdbId}/external_ids`);
+    return d.imdb_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch a title's poster URL by TMDB id. Null when unknown or missing art. */
