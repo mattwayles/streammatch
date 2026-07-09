@@ -144,19 +144,34 @@ export async function pullNuvioLibrary(): Promise<NuvioLibraryItem[]> {
   throw new Error(`Nuvio library exceeds ${MAX_PAGES * PAGE_SIZE} items; aborting sync`);
 }
 
-/** Map a Nuvio library item to StreamMatch's TMDB identity. Null if not TMDB-backed. */
-export function parseNuvioItem(
-  item: NuvioLibraryItem,
-): { tmdbId: number; mediaType: MediaType; title: string } | null {
-  if (!item.content_id?.startsWith("tmdb:")) return null;
-  const tmdbId = Number(item.content_id.slice("tmdb:".length));
-  if (!Number.isFinite(tmdbId)) return null;
+export type ParsedNuvioItem =
+  | { source: "tmdb"; tmdbId: number; mediaType: MediaType; title: string }
+  | { source: "imdb"; imdbId: string; mediaType: MediaType | null; title: string };
+
+/**
+ * Map a Nuvio library item to a known identity. Nuvio content ids are either
+ * TMDB-backed ("tmdb:550") or IMDb-backed ("tt0137523", the default from the
+ * Cinemeta addon). IMDb items still need resolving to a TMDB id by the caller.
+ * Null when the id scheme is unrecognized.
+ */
+export function parseNuvioItem(item: NuvioLibraryItem): ParsedNuvioItem | null {
+  const contentId = item.content_id ?? "";
   const mediaType: MediaType | null =
     item.content_type === "movie" ? "movie"
     : item.content_type === "series" || item.content_type === "tv" ? "tv"
     : null;
-  if (!mediaType) return null;
-  return { tmdbId, mediaType, title: item.name ?? "" };
+  const title = item.name ?? "";
+
+  if (contentId.startsWith("tmdb:")) {
+    const tmdbId = Number(contentId.slice("tmdb:".length));
+    if (!Number.isFinite(tmdbId) || !mediaType) return null;
+    return { source: "tmdb", tmdbId, mediaType, title };
+  }
+
+  const imdbId = contentId.startsWith("imdb:") ? contentId.slice("imdb:".length) : contentId;
+  if (/^tt\d+$/.test(imdbId)) return { source: "imdb", imdbId, mediaType, title };
+
+  return null;
 }
 
 export interface NuvioAddEntry {

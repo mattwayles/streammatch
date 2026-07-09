@@ -56,6 +56,32 @@ export function imageUrl(path: string | null | undefined, size: string): string 
 }
 
 // ---------------------------------------------------------------------------
+// External-ID lookup
+// ---------------------------------------------------------------------------
+
+interface FindResults {
+  movie_results?: { id: number }[];
+  tv_results?: { id: number }[];
+}
+
+/**
+ * Resolve an IMDb id (e.g. "tt0137523") to a TMDB identity. `preferred` breaks
+ * the tie when IMDb ids match both a movie and a TV entry. Null if unknown.
+ */
+export async function findByImdbId(
+  imdbId: string,
+  preferred?: MediaType,
+): Promise<{ tmdbId: number; mediaType: MediaType } | null> {
+  const data = await tmdb<FindResults>(`/find/${imdbId}`, { external_source: "imdb_id" });
+  const movie = data.movie_results?.[0]?.id;
+  const tv = data.tv_results?.[0]?.id;
+  if (movie && (preferred === "movie" || !tv)) return { tmdbId: movie, mediaType: "movie" };
+  if (tv) return { tmdbId: tv, mediaType: "tv" };
+  if (movie) return { tmdbId: movie, mediaType: "movie" };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Genres
 // ---------------------------------------------------------------------------
 

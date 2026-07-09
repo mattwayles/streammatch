@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isNuvioConfigured, parseNuvioItem, pullNuvioLibrary } from "@/lib/nuvio";
+import { findByImdbId } from "@/lib/tmdb";
 import {
   getDislikedKeys,
   getLikedKeys,
@@ -8,13 +9,24 @@ import {
   itemKey,
   markWatchlistMany,
 } from "@/lib/supabase";
+import type { MediaType } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const RESOLVE_BATCH = 10;
+
+interface SyncCandidate {
+  tmdbId: number;
+  mediaType: MediaType;
+  title: string;
+}
 
 /**
  * Pull the Nuvio library and insert any titles StreamMatch hasn't seen yet
- * into the watchlist. Titles already on any list (watchlist, liked, disliked)
- * are left alone so sync never resurrects something the user already rated.
+ * into the watchlist. Nuvio ids are TMDB- or IMDb-backed; IMDb ids are
+ * resolved to TMDB via /find. Titles already on any list (watchlist, liked,
+ * disliked) are left alone so sync never resurrects something already rated.
  */
 export async function POST() {
   try {
@@ -33,23 +45,54 @@ export async function POST() {
 
     const library = await pullNuvioLibrary();
 
+    const candidates: SyncCandidate[] = [];
+    const imdbItems: { imdbId: string; mediaType: MediaType | null; title: string }[] = [];
+    const unsupportedIds: string[] = [];
+    for (const item of library) {
+      const parsed = parseNuvioItem(item);
+      if (!parsed) unsupportedIds.push(item.content_id ?? "(empty)");
+      else if (parsed.source === "tmdb") candidates.push(parsed);
+      else imdbItems.push(parsed);
+    }
+
+    // Resolve IMDb-backed items to TMDB identities in small parallel batches.
+    let unresolved = 0;
+    for (let i = 0; i < imdbItems.length; i += RESOLVE_BATCH) {
+      const batch = imdbItems.slice(i, i + RESOLVE_BATCH);
+      const results = await Promise.all(
+        batch.map(async (item) => {
+          try {
+            return await findByImdbId(item.imdbId, item.mediaType ?? undefined);
+          } catch (err) {
+            console.error(`[/api/nuvio/sync] TMDB find(${item.imdbId}):`, err);
+            return null;
+          }
+        }),
+      );
+      results.forEach((found, j) => {
+        if (found) candidates.push({ ...found, title: batch[j].title });
+        else {
+          unresolved++;
+          unsupportedIds.push(batch[j].imdbId);
+        }
+      });
+    }
+
     const [watchlist, liked, disliked] = await Promise.all([
       getWatchlistKeys(),
       getLikedKeys(),
       getDislikedKeys(),
     ]);
 
-    let unsupported = 0;
-    const fresh = new Map<string, { tmdbId: number; mediaType: "movie" | "tv"; title: string }>();
-    for (const item of library) {
-      const parsed = parseNuvioItem(item);
-      if (!parsed) {
-        unsupported++;
+    const fresh = new Map<string, SyncCandidate>();
+    let skipped = 0;
+    for (const c of candidates) {
+      const key = itemKey(c.mediaType, c.tmdbId);
+      if (watchlist.has(key) || liked.has(key) || disliked.has(key) || fresh.has(key)) {
+        skipped++;
         continue;
       }
-      const key = itemKey(parsed.mediaType, parsed.tmdbId);
-      if (watchlist.has(key) || liked.has(key) || disliked.has(key)) continue;
-      fresh.set(key, parsed);
+      fresh.set(key, c);
     }
 
     await markWatchlistMany([...fresh.values()]);
@@ -58,8 +101,10 @@ export async function POST() {
       ok: true,
       pulled: library.length,
       added: fresh.size,
-      skipped: library.length - unsupported - fresh.size,
-      unsupported,
+      skipped,
+      unsupported: unsupportedIds.length,
+      unresolved,
+      unsupportedSample: unsupportedIds.slice(0, 5),
     });
   } catch (err) {
     console.error("[/api/nuvio/sync POST]", err);
