@@ -145,8 +145,8 @@ export async function pullNuvioLibrary(): Promise<NuvioLibraryItem[]> {
 }
 
 export type ParsedNuvioItem =
-  | { source: "tmdb"; tmdbId: number; mediaType: MediaType; title: string }
-  | { source: "imdb"; imdbId: string; mediaType: MediaType | null; title: string };
+  | { source: "tmdb"; tmdbId: number; mediaType: MediaType; title: string; poster: string | null }
+  | { source: "imdb"; imdbId: string; mediaType: MediaType | null; title: string; poster: string | null };
 
 /**
  * Map a Nuvio library item to a known identity. Nuvio content ids are either
@@ -161,15 +161,16 @@ export function parseNuvioItem(item: NuvioLibraryItem): ParsedNuvioItem | null {
     : item.content_type === "series" || item.content_type === "tv" ? "tv"
     : null;
   const title = item.name ?? "";
+  const poster = item.poster ?? null;
 
   if (contentId.startsWith("tmdb:")) {
     const tmdbId = Number(contentId.slice("tmdb:".length));
     if (!Number.isFinite(tmdbId) || !mediaType) return null;
-    return { source: "tmdb", tmdbId, mediaType, title };
+    return { source: "tmdb", tmdbId, mediaType, title, poster };
   }
 
   const imdbId = contentId.startsWith("imdb:") ? contentId.slice("imdb:".length) : contentId;
-  if (/^tt\d+$/.test(imdbId)) return { source: "imdb", imdbId, mediaType, title };
+  if (/^tt\d+$/.test(imdbId)) return { source: "imdb", imdbId, mediaType, title, poster };
 
   return null;
 }

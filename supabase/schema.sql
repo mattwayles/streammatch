@@ -73,9 +73,13 @@ create table if not exists public.streammatch_watchlist (
   tmdb_id     integer not null,
   media_type  text not null check (media_type in ('movie', 'tv')),
   title       text,
+  poster      text,
   created_at  timestamptz not null default now(),
   unique (tmdb_id, media_type)
 );
+
+-- Upgrade path for tables created before the poster column existed.
+alter table public.streammatch_watchlist add column if not exists poster text;
 
 alter table public.streammatch_watchlist enable row level security;
 
@@ -96,6 +100,14 @@ create policy "streammatch_watchlist anon delete"
   on public.streammatch_watchlist
   for delete to anon
   using (true);
+
+-- Update lets the app backfill poster art onto rows saved before posters existed.
+drop policy if exists "streammatch_watchlist anon update" on public.streammatch_watchlist;
+create policy "streammatch_watchlist anon update"
+  on public.streammatch_watchlist
+  for update to anon
+  using (true)
+  with check (true);
 
 -- Liked titles: watched and enjoyed — used as a strong positive-taste signal
 -- so the curator prioritizes similar genres, tones, and themes.

@@ -55,6 +55,16 @@ export function imageUrl(path: string | null | undefined, size: string): string 
   return path ? `${IMG_BASE}/${size}${path}` : null;
 }
 
+/** Fetch a title's poster URL by TMDB id. Null when unknown or missing art. */
+export async function posterFor(mediaType: MediaType, tmdbId: number): Promise<string | null> {
+  try {
+    const d = await tmdb<{ poster_path?: string | null }>(`/${mediaType}/${tmdbId}`);
+    return imageUrl(d.poster_path, "w342");
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // External-ID lookup
 // ---------------------------------------------------------------------------

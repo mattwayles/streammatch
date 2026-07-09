@@ -1,13 +1,44 @@
 import { NextResponse } from "next/server";
 import { addToNuvioLibrary, isNuvioConfigured } from "@/lib/nuvio";
-import { isConfigured, listWatchlist, markWatchlist, unmarkWatchlist } from "@/lib/supabase";
+import {
+  isConfigured,
+  listWatchlist,
+  markWatchlist,
+  unmarkWatchlist,
+  updateWatchlistPosters,
+} from "@/lib/supabase";
+import { posterFor } from "@/lib/tmdb";
 import type { MediaType } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const POSTER_BATCH = 10;
 
 export async function GET() {
   try {
     const items = await listWatchlist();
+
+    // Backfill poster art for rows saved before posters were stored (e.g. the
+    // initial Nuvio import). Fetched from TMDB, then persisted best-effort so
+    // subsequent loads are instant.
+    const missing = items.filter((i) => !i.posterUrl);
+    if (missing.length > 0 && process.env.TMDB_API_KEY) {
+      const found: { tmdbId: number; mediaType: MediaType; poster: string }[] = [];
+      for (let i = 0; i < missing.length; i += POSTER_BATCH) {
+        const batch = missing.slice(i, i + POSTER_BATCH);
+        const posters = await Promise.all(
+          batch.map((item) => posterFor(item.mediaType, item.tmdbId)),
+        );
+        posters.forEach((poster, j) => {
+          if (!poster) return;
+          batch[j].posterUrl = poster;
+          found.push({ tmdbId: batch[j].tmdbId, mediaType: batch[j].mediaType, poster });
+        });
+      }
+      await updateWatchlistPosters(found);
+    }
+
     return NextResponse.json({ items, configured: isConfigured() });
   } catch (err) {
     console.error("[/api/watchlist GET]", err);
@@ -27,7 +58,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid tmdbId or mediaType" }, { status: 400 });
     }
 
-    await markWatchlist(tmdbId, mediaType, title);
+    const poster = typeof body?.poster === "string" ? body.poster : null;
+    await markWatchlist(tmdbId, mediaType, title, poster);
 
     // Mirror the new item to the Nuvio library. Best-effort: a Nuvio outage
     // must never block saving to the local watchlist.

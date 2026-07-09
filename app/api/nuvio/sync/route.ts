@@ -20,6 +20,7 @@ interface SyncCandidate {
   tmdbId: number;
   mediaType: MediaType;
   title: string;
+  poster: string | null;
 }
 
 /**
@@ -46,7 +47,12 @@ export async function POST() {
     const library = await pullNuvioLibrary();
 
     const candidates: SyncCandidate[] = [];
-    const imdbItems: { imdbId: string; mediaType: MediaType | null; title: string }[] = [];
+    const imdbItems: {
+      imdbId: string;
+      mediaType: MediaType | null;
+      title: string;
+      poster: string | null;
+    }[] = [];
     const unsupportedIds: string[] = [];
     for (const item of library) {
       const parsed = parseNuvioItem(item);
@@ -70,7 +76,7 @@ export async function POST() {
         }),
       );
       results.forEach((found, j) => {
-        if (found) candidates.push({ ...found, title: batch[j].title });
+        if (found) candidates.push({ ...found, title: batch[j].title, poster: batch[j].poster });
         else {
           unresolved++;
           unsupportedIds.push(batch[j].imdbId);
