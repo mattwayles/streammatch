@@ -6,8 +6,9 @@ export const runtime = "nodejs";
 
 // Whitelisted settings and their expected value type. Add entries here as new
 // settings ship; unknown keys are rejected.
-const SETTING_TYPES: Record<string, "boolean"> = {
+const SETTING_TYPES: Record<string, "boolean" | "string"> = {
   nuvio_sync_enabled: "boolean",
+  preferred_language: "string",
 };
 
 export async function GET() {
@@ -18,6 +19,8 @@ export async function GET() {
       nuvioConfigured: isNuvioConfigured(),
       settings: {
         nuvio_sync_enabled: stored.nuvio_sync_enabled !== false,
+        preferred_language:
+          typeof stored.preferred_language === "string" ? stored.preferred_language : "en",
       },
     });
   } catch (err) {
@@ -34,6 +37,9 @@ export async function PUT(req: Request) {
     const expected = SETTING_TYPES[key];
     if (!expected || typeof body?.value !== expected) {
       return NextResponse.json({ error: "Invalid setting key or value" }, { status: 400 });
+    }
+    if (typeof body.value === "string" && body.value.length > 16) {
+      return NextResponse.json({ error: "Invalid setting value" }, { status: 400 });
     }
     await setAppSetting(key, body.value);
     return NextResponse.json({ ok: true });

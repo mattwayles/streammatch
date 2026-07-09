@@ -76,8 +76,14 @@ interface RawSearchTitle {
   vote_count?: number;
   popularity?: number;
   genre_ids?: number[];
+  original_language?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
+}
+
+/** True when the title passes the preferred-language filter ("" = any). */
+function inLanguage(t: RawSearchTitle, language?: string): boolean {
+  return !language || !t.original_language || t.original_language === language;
 }
 
 /** Map a raw TMDB title to the Recommendation shape (editorial fields empty). */
@@ -99,13 +105,31 @@ function toBasicRec(t: RawSearchTitle, mediaType: MediaType): Recommendation {
   };
 }
 
-/** Top titles (movies + TV merged) sorted by TMDB popularity. Paginated. */
+/** Top titles (movies + TV merged) sorted by TMDB popularity. Paginated.
+ * With a language, uses discover + with_original_language so pages stay full
+ * instead of thinning out from post-filtering. */
 export async function popularTitles(
   page = 1,
+  language?: string,
 ): Promise<{ items: Recommendation[]; hasMore: boolean }> {
   const [movies, tv] = await Promise.all([
-    tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region(), page }),
-    tmdb<{ results: RawSearchTitle[] }>("/tv/popular", { page }),
+    language
+      ? tmdb<{ results: RawSearchTitle[] }>("/discover/movie", {
+          sort_by: "popularity.desc",
+          include_adult: "false",
+          with_original_language: language,
+          region: region(),
+          page,
+        })
+      : tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region(), page }),
+    language
+      ? tmdb<{ results: RawSearchTitle[] }>("/discover/tv", {
+          sort_by: "popularity.desc",
+          include_adult: "false",
+          with_original_language: language,
+          page,
+        })
+      : tmdb<{ results: RawSearchTitle[] }>("/tv/popular", { page }),
   ]);
   const merged = [
     ...(movies.results ?? []).map((t) => ({ t, type: "movie" as MediaType })),
@@ -205,6 +229,8 @@ export async function curatedFeed(opts: {
   watchlist: SeedRef[];
   disliked: SeedRef[];
   page: number;
+  /** Restrict candidates to this original language ("" or undefined = any). */
+  language?: string;
 }): Promise<{ items: Recommendation[]; hasMore: boolean }> {
   const seeds = [
     ...opts.liked.slice(0, SEED_CAP_PER_LIST).map((seed) => ({ seed, weight: LIKED_WEIGHT })),
@@ -216,7 +242,9 @@ export async function curatedFeed(opts: {
       .map((seed) => ({ seed, weight: -DISLIKED_PENALTY })),
   ];
 
-  const cacheKey = seeds.map((s) => `${s.weight}:${s.seed.mediaType}:${s.seed.tmdbId}`).join(",");
+  const cacheKey =
+    `lang=${opts.language ?? ""}|` +
+    seeds.map((s) => `${s.weight}:${s.seed.mediaType}:${s.seed.tmdbId}`).join(",");
   const cached = feedCache.get(cacheKey);
   let pool: Recommendation[];
   if (cached && cached.expires > Date.now()) {
@@ -235,6 +263,7 @@ export async function curatedFeed(opts: {
     lists.forEach((results, i) => {
       const { weight } = seeds[i];
       for (const t of results) {
+        if (!inLanguage(t, opts.language)) continue;
         const type: MediaType = t.media_type === "tv" ? "tv" : "movie";
         const key = `${type}:${t.id}`;
         const entry = scored.get(key) ?? { t, type, score: 0 };
@@ -262,13 +291,14 @@ export async function curatedFeed(opts: {
  */
 export async function searchTitles(
   query: string,
+  language?: string,
 ): Promise<(Recommendation & { related: boolean })[]> {
   const data = await tmdb<{ results: RawSearchTitle[] }>("/search/multi", {
     query,
     include_adult: "false",
   });
   const matches = (data.results ?? []).filter(
-    (t) => t.media_type === "movie" || t.media_type === "tv",
+    (t) => (t.media_type === "movie" || t.media_type === "tv") && inLanguage(t, language),
   );
 
   const out: (Recommendation & { related: boolean })[] = [];
@@ -293,7 +323,7 @@ export async function searchTitles(
     for (const t of settled.value.results ?? []) {
       const type = (t.media_type === "tv" ? "tv" : "movie") as MediaType;
       const key = `${type}:${t.id}`;
-      if (seen.has(key)) continue;
+      if (seen.has(key) || !inLanguage(t, language)) continue;
       seen.add(key);
       related.push({ t, type });
     }

@@ -5,7 +5,22 @@ import { useEffect, useState } from "react";
 interface SettingsState {
   nuvioConfigured: boolean;
   nuvio_sync_enabled: boolean;
+  preferred_language: string;
 }
+
+const LANGUAGES = [
+  { code: "", label: "Any language" },
+  { code: "en", label: "English" },
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "zh", label: "Chinese" },
+  { code: "hi", label: "Hindi" },
+];
 
 function ToggleSwitch({
   checked,
@@ -54,6 +69,10 @@ export default function SettingsMenu() {
         setState({
           nuvioConfigured: Boolean(data.nuvioConfigured),
           nuvio_sync_enabled: data.settings?.nuvio_sync_enabled !== false,
+          preferred_language:
+            typeof data.settings?.preferred_language === "string"
+              ? data.settings.preferred_language
+              : "en",
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -61,21 +80,21 @@ export default function SettingsMenu() {
     })();
   }, [open, state]);
 
-  async function setNuvioSync(value: boolean) {
+  async function saveSetting(key: "nuvio_sync_enabled" | "preferred_language", value: boolean | string) {
     if (!state) return;
-    const prev = state.nuvio_sync_enabled;
-    setState({ ...state, nuvio_sync_enabled: value });
+    const prev = state[key];
+    setState({ ...state, [key]: value });
     setError(null);
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "nuvio_sync_enabled", value }),
+        body: JSON.stringify({ key, value }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save");
     } catch (e) {
-      setState((s) => (s ? { ...s, nuvio_sync_enabled: prev } : s));
+      setState((s) => (s ? { ...s, [key]: prev } : s));
       setError(e instanceof Error ? e.message : "Could not save");
     }
   }
@@ -135,8 +154,28 @@ export default function SettingsMenu() {
                     label="Nuvio library sync"
                     checked={state.nuvioConfigured && state.nuvio_sync_enabled}
                     disabled={!state.nuvioConfigured}
-                    onChange={setNuvioSync}
+                    onChange={(value) => saveSetting("nuvio_sync_enabled", value)}
                   />
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-medium text-white">Preferred language</p>
+                    <p className="mt-1 text-sm text-white/50">
+                      Only show search and browse results whose original language matches.
+                    </p>
+                  </div>
+                  <select
+                    value={state.preferred_language}
+                    onChange={(e) => saveSetting("preferred_language", e.target.value)}
+                    aria-label="Preferred language"
+                    className="glass shrink-0 rounded-full bg-transparent px-4 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-white/25 [&>option]:bg-ink-900"
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
                 </li>
               </ul>
             )}

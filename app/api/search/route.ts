@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { curatedFeed, popularTitles, searchTitles } from "@/lib/tmdb";
 import {
+  getAppSettings,
   getDislikedKeys,
   getLikedKeys,
   getWatchlistKeys,
@@ -49,9 +50,14 @@ export async function GET(req: Request) {
     // ("recommended") uses the curated feed whenever seeds exist.
     const wantPopular = url.searchParams.get("feed") === "popular";
 
+    // Preferred original language from Settings; defaults to English, "" = any.
+    const stored = await getAppSettings();
+    const language =
+      typeof stored.preferred_language === "string" ? stored.preferred_language : "en";
+
     if (q) {
       const [titles, watchlist, liked, disliked] = await Promise.all([
-        searchTitles(q),
+        searchTitles(q, language),
         getWatchlistKeys(),
         getLikedKeys(),
         getDislikedKeys(),
@@ -79,8 +85,9 @@ export async function GET(req: Request) {
           watchlist: watchlistItems.map(toSeed),
           disliked: dislikedItems.map(toSeed),
           page,
+          language,
         })
-      : await popularTitles(page);
+      : await popularTitles(page, language);
 
     return NextResponse.json({
       items: annotate(titles, toKeys(watchlistItems), toKeys(likedItems), toKeys(dislikedItems)),
