@@ -75,6 +75,7 @@ interface RawSearchTitle {
   vote_average?: number;
   vote_count?: number;
   popularity?: number;
+  genre_ids?: number[];
   poster_path?: string | null;
   backdrop_path?: string | null;
 }
@@ -128,12 +129,16 @@ export interface SeedRef {
 
 const FEED_PAGE_SIZE = 24;
 const FEED_TTL_MS = 5 * 60_000;
-/** Most recent titles taken per list as recommendation seeds. */
-const POSITIVE_SEED_CAP = 8;
-const NEGATIVE_SEED_CAP = 8;
+/** Safety bound per list — effectively "the whole library" for personal use,
+ * while capping worst-case TMDB call volume and feed build time. */
+const SEED_CAP_PER_LIST = 250;
+/** Parallel TMDB recommendation calls per batch (stays well under rate limits). */
+const RECS_CONCURRENCY = 12;
 const LIKED_WEIGHT = 2;
 const WATCHLIST_WEIGHT = 1;
 const DISLIKED_PENALTY = 3;
+/** How strongly repeated genres are pushed down the feed (0 = off). */
+const DIVERSITY_PENALTY = 0.4;
 
 // The scored pool is deterministic for a given set of seeds, so pages sliced
 // from it stay consistent while the user scrolls. Cached per warm instance.
@@ -150,10 +155,49 @@ async function recsForSeed(seed: SeedRef): Promise<RawSearchTitle[]> {
   }
 }
 
+interface ScoredCandidate {
+  t: RawSearchTitle;
+  type: MediaType;
+  score: number;
+}
+
+/**
+ * Greedy diversity re-rank: each pick divides a candidate's effective score by
+ * how often its primary genre has already been picked, so a genre that
+ * dominates the seed lists (e.g. a recent run of comedy likes) spreads through
+ * the feed instead of monopolizing the first pages.
+ */
+function diversifyByGenre(candidates: ScoredCandidate[]): ScoredCandidate[] {
+  const pool = [...candidates].sort(
+    (a, b) => b.score - a.score || (b.t.popularity ?? 0) - (a.t.popularity ?? 0),
+  );
+  const picked: ScoredCandidate[] = [];
+  const genreSeen = new Map<number, number>();
+  while (pool.length > 0) {
+    let bestIdx = 0;
+    let bestVal = -Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const genre = pool[i].t.genre_ids?.[0] ?? -1;
+      const seen = genreSeen.get(genre) ?? 0;
+      const val = pool[i].score / (1 + DIVERSITY_PENALTY * seen);
+      if (val > bestVal) {
+        bestVal = val;
+        bestIdx = i;
+      }
+    }
+    const [chosen] = pool.splice(bestIdx, 1);
+    const genre = chosen.t.genre_ids?.[0] ?? -1;
+    genreSeen.set(genre, (genreSeen.get(genre) ?? 0) + 1);
+    picked.push(chosen);
+  }
+  return picked;
+}
+
 /**
  * Personalized browse feed: TMDB "more like this" seeded from the user's
- * watchlist and liked titles, down-ranked by anything associated with their
- * disliked titles. Liked/disliked titles themselves are excluded.
+ * entire watchlist and liked list, down-ranked by anything associated with
+ * their disliked titles. Liked/disliked titles themselves are excluded, and
+ * the final order is genre-diversified so no single genre floods the feed.
  */
 export async function curatedFeed(opts: {
   liked: SeedRef[];
@@ -162,12 +206,12 @@ export async function curatedFeed(opts: {
   page: number;
 }): Promise<{ items: Recommendation[]; hasMore: boolean }> {
   const seeds = [
-    ...opts.liked.slice(0, POSITIVE_SEED_CAP).map((seed) => ({ seed, weight: LIKED_WEIGHT })),
+    ...opts.liked.slice(0, SEED_CAP_PER_LIST).map((seed) => ({ seed, weight: LIKED_WEIGHT })),
     ...opts.watchlist
-      .slice(0, POSITIVE_SEED_CAP)
+      .slice(0, SEED_CAP_PER_LIST)
       .map((seed) => ({ seed, weight: WATCHLIST_WEIGHT })),
     ...opts.disliked
-      .slice(0, NEGATIVE_SEED_CAP)
+      .slice(0, SEED_CAP_PER_LIST)
       .map((seed) => ({ seed, weight: -DISLIKED_PENALTY })),
   ];
 
@@ -180,8 +224,16 @@ export async function curatedFeed(opts: {
     const exclude = new Set(
       [...opts.liked, ...opts.disliked].map((s) => `${s.mediaType}:${s.tmdbId}`),
     );
-    const scored = new Map<string, { t: RawSearchTitle; type: MediaType; score: number }>();
-    const lists = await Promise.all(seeds.map(({ seed }) => recsForSeed(seed)));
+    const scored = new Map<string, ScoredCandidate>();
+    // One TMDB call per seed, in bounded batches to respect rate limits.
+    const lists: RawSearchTitle[][] = [];
+    for (let i = 0; i < seeds.length; i += RECS_CONCURRENCY) {
+      lists.push(
+        ...(await Promise.all(
+          seeds.slice(i, i + RECS_CONCURRENCY).map(({ seed }) => recsForSeed(seed)),
+        )),
+      );
+    }
     lists.forEach((results, i) => {
       const { weight } = seeds[i];
       for (const t of results) {
@@ -193,10 +245,9 @@ export async function curatedFeed(opts: {
         scored.set(key, entry);
       }
     });
-    pool = [...scored.values()]
-      .filter((e) => e.score > 0)
-      .sort((a, b) => b.score - a.score || (b.t.popularity ?? 0) - (a.t.popularity ?? 0))
-      .map((e) => toBasicRec(e.t, e.type));
+    pool = diversifyByGenre([...scored.values()].filter((e) => e.score > 0)).map((e) =>
+      toBasicRec(e.t, e.type),
+    );
     feedCache.set(cacheKey, { pool, expires: Date.now() + FEED_TTL_MS });
   }
 
