@@ -109,7 +109,7 @@ function WatchlistGrid() {
       />
 
       {!loading && !error && configured && items.length > 0 && (
-        <ul className="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
+        <ul className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
           {items.map((item) => {
             const key = `${item.mediaType}:${item.tmdbId}`;
             return (
@@ -307,7 +307,7 @@ export default function LibraryPage() {
   const [syncVersion, setSyncVersion] = useState(0);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
+    <main className="mx-auto max-w-screen-2xl px-6 py-16 sm:px-10">
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-2 text-sm font-medium uppercase tracking-[0.25em] text-glow-soft">
