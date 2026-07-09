@@ -4,6 +4,8 @@ import {
   isNuvioSyncEnabled,
   parseNuvioItem,
   pullNuvioLibrary,
+  pullNuvioWatched,
+  type NuvioLibraryItem,
 } from "@/lib/nuvio";
 import { findByImdbId } from "@/lib/tmdb";
 import {
@@ -12,6 +14,7 @@ import {
   getWatchlistKeys,
   isConfigured,
   itemKey,
+  markLikedMany,
   markWatchlistMany,
 } from "@/lib/supabase";
 import type { MediaType } from "@/lib/types";
@@ -21,18 +24,71 @@ export const maxDuration = 60;
 
 const RESOLVE_BATCH = 10;
 
-interface SyncCandidate {
+interface ResolvedRef {
   tmdbId: number;
   mediaType: MediaType;
   title: string;
   poster: string | null;
 }
 
+interface ResolveOutcome {
+  resolved: ResolvedRef[];
+  unsupportedIds: string[];
+  unresolved: number;
+}
+
+/** Map Nuvio content refs to TMDB identities, resolving IMDb-keyed items via
+ * TMDB /find in bounded batches. Input should already be deduped. */
+async function resolveRefs(items: NuvioLibraryItem[]): Promise<ResolveOutcome> {
+  const resolved: ResolvedRef[] = [];
+  const unsupportedIds: string[] = [];
+  const imdbItems: {
+    imdbId: string;
+    mediaType: MediaType | null;
+    title: string;
+    poster: string | null;
+  }[] = [];
+
+  for (const item of items) {
+    const parsed = parseNuvioItem(item);
+    if (!parsed) unsupportedIds.push(item.content_id ?? "(empty)");
+    else if (parsed.source === "tmdb") resolved.push(parsed);
+    else imdbItems.push(parsed);
+  }
+
+  let unresolved = 0;
+  for (let i = 0; i < imdbItems.length; i += RESOLVE_BATCH) {
+    const batch = imdbItems.slice(i, i + RESOLVE_BATCH);
+    const results = await Promise.all(
+      batch.map(async (item) => {
+        try {
+          return await findByImdbId(item.imdbId, item.mediaType ?? undefined);
+        } catch (err) {
+          console.error(`[/api/nuvio/sync] TMDB find(${item.imdbId}):`, err);
+          return null;
+        }
+      }),
+    );
+    results.forEach((found, j) => {
+      if (found) resolved.push({ ...found, title: batch[j].title, poster: batch[j].poster });
+      else {
+        unresolved++;
+        unsupportedIds.push(batch[j].imdbId);
+      }
+    });
+  }
+
+  return { resolved, unsupportedIds, unresolved };
+}
+
 /**
- * Pull the Nuvio library and insert any titles StreamMatch hasn't seen yet
- * into the watchlist. Nuvio ids are TMDB- or IMDb-backed; IMDb ids are
- * resolved to TMDB via /find. Titles already on any list (watchlist, liked,
- * disliked) are left alone so sync never resurrects something already rated.
+ * Pull the Nuvio library AND watch history:
+ * - Watched titles (Nuvio has no like/dislike sentiment) are inserted into the
+ *   liked list — watching implies having seen it, and liked is the positive
+ *   default. Per-episode series entries collapse to one series title.
+ * - Library titles are inserted into the watchlist.
+ * Both are additive only: titles already on any local list are never moved,
+ * and a new title present in both sources lands in liked (it's been watched).
  */
 export async function POST() {
   try {
@@ -55,72 +111,70 @@ export async function POST() {
       );
     }
 
-    const library = await pullNuvioLibrary();
+    const [library, watchedRaw] = await Promise.all([pullNuvioLibrary(), pullNuvioWatched()]);
 
-    const candidates: SyncCandidate[] = [];
-    const imdbItems: {
-      imdbId: string;
-      mediaType: MediaType | null;
-      title: string;
-      poster: string | null;
-    }[] = [];
-    const unsupportedIds: string[] = [];
-    for (const item of library) {
-      const parsed = parseNuvioItem(item);
-      if (!parsed) unsupportedIds.push(item.content_id ?? "(empty)");
-      else if (parsed.source === "tmdb") candidates.push(parsed);
-      else imdbItems.push(parsed);
+    // Collapse per-episode watch history to unique titles before resolving.
+    const watchedUnique = new Map<string, NuvioLibraryItem>();
+    for (const w of watchedRaw) {
+      const key = `${w.content_type}:${w.content_id}`;
+      if (!watchedUnique.has(key)) {
+        watchedUnique.set(key, {
+          content_id: w.content_id,
+          content_type: w.content_type,
+          name: w.title,
+        });
+      }
     }
 
-    // Resolve IMDb-backed items to TMDB identities in small parallel batches.
-    let unresolved = 0;
-    for (let i = 0; i < imdbItems.length; i += RESOLVE_BATCH) {
-      const batch = imdbItems.slice(i, i + RESOLVE_BATCH);
-      const results = await Promise.all(
-        batch.map(async (item) => {
-          try {
-            return await findByImdbId(item.imdbId, item.mediaType ?? undefined);
-          } catch (err) {
-            console.error(`[/api/nuvio/sync] TMDB find(${item.imdbId}):`, err);
-            return null;
-          }
-        }),
-      );
-      results.forEach((found, j) => {
-        if (found) candidates.push({ ...found, title: batch[j].title, poster: batch[j].poster });
-        else {
-          unresolved++;
-          unsupportedIds.push(batch[j].imdbId);
-        }
-      });
-    }
+    const [libraryRefs, watchedRefs] = await Promise.all([
+      resolveRefs(library),
+      resolveRefs([...watchedUnique.values()]),
+    ]);
 
     const [watchlist, liked, disliked] = await Promise.all([
       getWatchlistKeys(),
       getLikedKeys(),
       getDislikedKeys(),
     ]);
+    const taken = (key: string) => watchlist.has(key) || liked.has(key) || disliked.has(key);
 
-    const fresh = new Map<string, SyncCandidate>();
-    let skipped = 0;
-    for (const c of candidates) {
-      const key = itemKey(c.mediaType, c.tmdbId);
-      if (watchlist.has(key) || liked.has(key) || disliked.has(key) || fresh.has(key)) {
-        skipped++;
-        continue;
-      }
-      fresh.set(key, c);
+    // Watched → liked, first claim on new titles.
+    const likedAdditions = new Map<string, ResolvedRef>();
+    for (const ref of watchedRefs.resolved) {
+      const key = itemKey(ref.mediaType, ref.tmdbId);
+      if (taken(key) || likedAdditions.has(key)) continue;
+      likedAdditions.set(key, ref);
     }
 
-    await markWatchlistMany([...fresh.values()]);
+    // Library → watchlist, skipping anything claimed above.
+    const watchlistAdditions = new Map<string, ResolvedRef>();
+    for (const ref of libraryRefs.resolved) {
+      const key = itemKey(ref.mediaType, ref.tmdbId);
+      if (taken(key) || likedAdditions.has(key) || watchlistAdditions.has(key)) continue;
+      watchlistAdditions.set(key, ref);
+    }
 
+    await Promise.all([
+      markLikedMany([...likedAdditions.values()]),
+      markWatchlistMany([...watchlistAdditions.values()]),
+    ]);
+
+    const unsupportedIds = [...libraryRefs.unsupportedIds, ...watchedRefs.unsupportedIds];
     return NextResponse.json({
       ok: true,
-      pulled: library.length,
-      added: fresh.size,
-      skipped,
+      library: {
+        pulled: library.length,
+        added: watchlistAdditions.size,
+        skipped: libraryRefs.resolved.length - watchlistAdditions.size,
+      },
+      watched: {
+        pulled: watchedRaw.length,
+        unique: watchedUnique.size,
+        added: likedAdditions.size,
+        skipped: watchedRefs.resolved.length - likedAdditions.size,
+      },
       unsupported: unsupportedIds.length,
-      unresolved,
+      unresolved: libraryRefs.unresolved + watchedRefs.unresolved,
       unsupportedSample: unsupportedIds.slice(0, 5),
     });
   } catch (err) {

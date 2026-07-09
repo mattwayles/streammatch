@@ -272,12 +272,12 @@ function NuvioSync({ onSynced }: { onSynced: () => void }) {
       const res = await fetch("/api/nuvio/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Sync failed");
-      setMessage(
-        data.added > 0
-          ? `Added ${data.added} title${data.added === 1 ? "" : "s"} from Nuvio`
-          : "Already up to date",
-      );
-      if (data.added > 0) onSynced();
+      const parts = [
+        data.library?.added > 0 ? `${data.library.added} to your watch list` : null,
+        data.watched?.added > 0 ? `${data.watched.added} watched title${data.watched.added === 1 ? "" : "s"} to liked` : null,
+      ].filter(Boolean);
+      setMessage(parts.length ? `Added ${parts.join(" · ")} from Nuvio` : "Already up to date");
+      if (parts.length) onSynced();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Sync failed");
     } finally {
@@ -302,8 +302,9 @@ function NuvioSync({ onSynced }: { onSynced: () => void }) {
 }
 
 export default function LibraryPage() {
-  // Bumped after a Nuvio sync adds titles — remounts the watchlist so it refetches.
-  const [watchlistVersion, setWatchlistVersion] = useState(0);
+  // Bumped after a Nuvio sync adds titles — remounts the affected sections so
+  // they refetch (sync inserts into both the watchlist and the liked list).
+  const [syncVersion, setSyncVersion] = useState(0);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
@@ -320,7 +321,7 @@ export default function LibraryPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <NuvioSync onSynced={() => setWatchlistVersion((v) => v + 1)} />
+          <NuvioSync onSynced={() => setSyncVersion((v) => v + 1)} />
           <Link
             href="/"
             className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
@@ -330,9 +331,10 @@ export default function LibraryPage() {
         </div>
       </div>
 
-      <WatchlistGrid key={`watchlist-${watchlistVersion}`} />
+      <WatchlistGrid key={`watchlist-${syncVersion}`} />
 
       <CollapsibleListSection
+        key={`liked-${syncVersion}`}
         kind="liked"
         title="👍 Liked"
         subtitle="Titles you've loved — used as a positive taste signal to refine future recommendations."

@@ -224,5 +224,8 @@ export const getLikedKeys = () => getKeys("liked");
 export const listLiked = () => list("liked");
 export const markLiked = (tmdbId: number, mediaType: MediaType, title: string) =>
   mark("liked", tmdbId, mediaType, title);
+export const markLikedMany = (
+  items: { tmdbId: number; mediaType: MediaType; title: string }[],
+) => markMany("liked", items);
 export const unmarkLiked = (tmdbId: number, mediaType: MediaType) =>
   unmark("liked", tmdbId, mediaType);

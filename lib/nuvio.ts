@@ -156,6 +156,31 @@ export async function pullNuvioLibrary(): Promise<NuvioLibraryItem[]> {
   throw new Error(`Nuvio library exceeds ${MAX_PAGES * PAGE_SIZE} items; aborting sync`);
 }
 
+export interface NuvioWatchedItem {
+  content_id: string;
+  content_type: string;
+  title?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  watched_at?: number | null;
+}
+
+/** Pull the complete Nuvio watch history for the configured profile.
+ * Additive use only — safe to return a capped subset (no full-replace push). */
+export async function pullNuvioWatched(): Promise<NuvioWatchedItem[]> {
+  const items: NuvioWatchedItem[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const batch = await rpc<NuvioWatchedItem[]>("sync_pull_watched_items", {
+      p_profile_id: profileId(),
+      p_page: page,
+      p_page_size: PAGE_SIZE,
+    });
+    items.push(...(batch ?? []));
+    if (!batch || batch.length < PAGE_SIZE) break;
+  }
+  return items;
+}
+
 export type ParsedNuvioItem =
   | { source: "tmdb"; tmdbId: number; mediaType: MediaType; title: string; poster: string | null }
   | { source: "imdb"; imdbId: string; mediaType: MediaType | null; title: string; poster: string | null };
