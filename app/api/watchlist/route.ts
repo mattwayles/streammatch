@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { addToNuvioLibrary, isNuvioConfigured } from "@/lib/nuvio";
 import { isConfigured, listWatchlist, markWatchlist, unmarkWatchlist } from "@/lib/supabase";
 import type { MediaType } from "@/lib/types";
 
@@ -27,7 +28,29 @@ export async function POST(req: Request) {
     }
 
     await markWatchlist(tmdbId, mediaType, title);
-    return NextResponse.json({ ok: true });
+
+    // Mirror the new item to the Nuvio library. Best-effort: a Nuvio outage
+    // must never block saving to the local watchlist.
+    let nuvio: "synced" | "skipped" | "failed" = "skipped";
+    if (isNuvioConfigured()) {
+      try {
+        await addToNuvioLibrary({
+          tmdbId,
+          mediaType,
+          title,
+          poster: typeof body?.poster === "string" ? body.poster : undefined,
+          background: typeof body?.background === "string" ? body.background : undefined,
+          description: typeof body?.description === "string" ? body.description : undefined,
+          releaseInfo: typeof body?.year === "string" ? body.year : undefined,
+        });
+        nuvio = "synced";
+      } catch (err) {
+        console.error("[/api/watchlist POST] Nuvio push failed:", err);
+        nuvio = "failed";
+      }
+    }
+
+    return NextResponse.json({ ok: true, nuvio });
   } catch (err) {
     console.error("[/api/watchlist POST]", err);
     const message = err instanceof Error ? err.message : "Unknown error";

@@ -46,6 +46,10 @@ seen — it's then hidden from all future suggestions.
      From your Supabase project → Project Settings → API. Then run `supabase/schema.sql`
      once in the Supabase SQL Editor to create the `streammatch_watched` table (with RLS).
      If these are unset, the app still works — watched filtering is simply skipped.
+   - `NUVIO_EMAIL` + `NUVIO_PASSWORD` — optional, enables two-way library sync with
+     [Nuvio](https://nuvio.tv). The "Sync" button on `/watched` pulls your Nuvio library
+     into the watchlist, and watchlist additions are mirrored back to Nuvio.
+     `NUVIO_PROFILE_ID` (1–6) selects the Nuvio profile, defaulting to 1.
 
 3. Run it:
 
@@ -73,8 +77,9 @@ Both API keys are read **server-side only** and never reach the browser.
 ## Deploy to Vercel
 
 1. Push to a Git repo and import it into Vercel.
-2. Add `ANTHROPIC_API_KEY` and `TMDB_API_KEY` (and optionally `TMDB_REGION`) as
-   environment variables.
+2. Add `ANTHROPIC_API_KEY` and `TMDB_API_KEY` (and optionally `TMDB_REGION`,
+   `SUPABASE_URL`/`SUPABASE_ANON_KEY`, and `NUVIO_EMAIL`/`NUVIO_PASSWORD`/
+   `NUVIO_PROFILE_ID`) as environment variables.
 3. Deploy.
 
 ## Project layout

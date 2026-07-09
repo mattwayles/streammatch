@@ -124,7 +124,48 @@ function Section({
   );
 }
 
+function NuvioSync({ onSynced }: { onSynced: () => void }) {
+  const [syncing, setSyncing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function sync() {
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/nuvio/sync", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+      setMessage(
+        data.added > 0
+          ? `Added ${data.added} title${data.added === 1 ? "" : "s"} from Nuvio`
+          : "Already up to date",
+      );
+      if (data.added > 0) onSynced();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <button
+        onClick={sync}
+        disabled={syncing}
+        className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold text-glow-soft disabled:opacity-40"
+      >
+        {syncing ? "Syncing…" : "⟳ Sync with Nuvio"}
+      </button>
+      {message && <p className="max-w-56 text-right text-xs text-white/50">{message}</p>}
+    </div>
+  );
+}
+
 export default function LibraryPage() {
+  // Bumped after a Nuvio sync adds titles — remounts the watchlist so it refetches.
+  const [watchlistVersion, setWatchlistVersion] = useState(0);
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
@@ -139,15 +180,19 @@ export default function LibraryPage() {
             Hidden from suggestions. Re-enable anything to bring it back.
           </p>
         </div>
-        <Link
-          href="/"
-          className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
-        >
-          ← Back
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <NuvioSync onSynced={() => setWatchlistVersion((v) => v + 1)} />
+          <Link
+            href="/"
+            className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
+          >
+            ← Back
+          </Link>
+        </div>
       </div>
 
       <Section
+        key={`watchlist-${watchlistVersion}`}
         kind="watchlist"
         title="🔖 Watch List"
         subtitle="Titles you've saved to watch later. Pick 'Something from my watch list' at the start to surface these."

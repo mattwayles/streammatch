@@ -247,7 +247,16 @@ export default function Home() {
       await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tmdbId: rec.id, mediaType: rec.mediaType, title: rec.title }),
+        body: JSON.stringify({
+          tmdbId: rec.id,
+          mediaType: rec.mediaType,
+          title: rec.title,
+          // Extra metadata so the item renders fully when mirrored to Nuvio.
+          poster: rec.posterUrl,
+          background: rec.screenshotUrl,
+          description: rec.description,
+          year: rec.year,
+        }),
       });
     } catch {
       // Non-fatal.

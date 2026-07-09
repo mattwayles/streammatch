@@ -91,6 +91,22 @@ async function mark(
   if (error) throw new Error(error.message);
 }
 
+async function markMany(
+  kind: ListKind,
+  items: { tmdbId: number; mediaType: MediaType; title: string }[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const c = client();
+  if (!c) throw new Error("Supabase is not configured");
+  const { error } = await c
+    .from(TABLES[kind])
+    .upsert(
+      items.map((i) => ({ tmdb_id: i.tmdbId, media_type: i.mediaType, title: i.title })),
+      { onConflict: "tmdb_id,media_type", ignoreDuplicates: true },
+    );
+  if (error) throw new Error(error.message);
+}
+
 async function unmark(kind: ListKind, tmdbId: number, mediaType: MediaType): Promise<void> {
   const c = client();
   if (!c) throw new Error("Supabase is not configured");
@@ -121,6 +137,9 @@ export const getWatchlistKeys = () => getKeys("watchlist");
 export const listWatchlist = () => list("watchlist");
 export const markWatchlist = (tmdbId: number, mediaType: MediaType, title: string) =>
   mark("watchlist", tmdbId, mediaType, title);
+export const markWatchlistMany = (
+  items: { tmdbId: number; mediaType: MediaType; title: string }[],
+) => markMany("watchlist", items);
 export const unmarkWatchlist = (tmdbId: number, mediaType: MediaType) =>
   unmark("watchlist", tmdbId, mediaType);
 
