@@ -106,25 +106,26 @@ function toBasicRec(t: RawSearchTitle, mediaType: MediaType): Recommendation {
 }
 
 /** Top titles (movies + TV merged) sorted by TMDB popularity. Paginated.
- * TMDB's popularity metric is global, so regional relevance comes from
- * `watch_region` + streamable-only: what's popular AND watchable where the
- * user is. Language filtering uses with_original_language so pages stay full
- * instead of thinning out from post-filtering. */
+ * Deliberately NOT filtered to streamable-only — theatrical-only releases
+ * stay in the list as theater ideas. Language filtering uses
+ * with_original_language so pages stay full instead of thinning out from
+ * post-filtering. */
 export async function popularTitles(
   page = 1,
   language?: string,
-  watchRegion?: string,
+  userRegion?: string,
 ): Promise<{ items: Recommendation[]; hasMore: boolean }> {
   const params = {
     sort_by: "popularity.desc",
     include_adult: "false",
     with_original_language: language || undefined,
-    watch_region: watchRegion || region(),
-    with_watch_monetization_types: "flatrate|free|ads",
     page,
   };
   const [movies, tv] = await Promise.all([
-    tmdb<{ results: RawSearchTitle[] }>("/discover/movie", { ...params, region: params.watch_region }),
+    tmdb<{ results: RawSearchTitle[] }>("/discover/movie", {
+      ...params,
+      region: userRegion || region(),
+    }),
     tmdb<{ results: RawSearchTitle[] }>("/discover/tv", params),
   ]);
   const merged = [

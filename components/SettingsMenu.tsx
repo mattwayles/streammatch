@@ -205,8 +205,7 @@ export default function SettingsMenu() {
                   <div className="min-w-0">
                     <p className="font-medium text-white">Region</p>
                     <p className="mt-1 text-sm text-white/50">
-                      The Popular feed shows titles streamable in this country, so it
-                      reflects what&apos;s watchable where you are.
+                      Your country — used for release dates in the Popular feed.
                     </p>
                   </div>
                   <select
