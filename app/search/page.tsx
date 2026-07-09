@@ -8,16 +8,24 @@ import type { Recommendation, SearchResult } from "@/lib/types";
 
 const DEBOUNCE_MS = 400;
 
+type BrowseMode = "curated" | "popular" | "search";
+
 export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [mode, setMode] = useState<BrowseMode>("popular");
   const [error, setError] = useState<string | null>(null);
   const [hideWatchlist, setHideWatchlist] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const pageRef = useRef(1);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef<() => void>(() => {});
   const { toasts, notify } = useToasts();
 
-  // Debounced fetch — empty query browses the most popular titles.
+  // Debounced fetch — an empty query browses the personalized feed.
   useEffect(() => {
     const timer = setTimeout(
       async () => {
@@ -27,12 +35,15 @@ export default function SearchPage() {
         setLoading(true);
         setError(null);
         try {
-          const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`, {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}&page=1`, {
             signal: controller.signal,
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || "Search failed");
+          pageRef.current = 1;
           setItems(data.items ?? []);
+          setHasMore(Boolean(data.hasMore));
+          setMode((data.mode as BrowseMode) ?? "search");
         } catch (e) {
           if (e instanceof DOMException && e.name === "AbortError") return;
           setError(e instanceof Error ? e.message : "Search failed");
@@ -44,6 +55,46 @@ export default function SearchPage() {
     );
     return () => clearTimeout(timer);
   }, [query]);
+
+  // Infinite scroll: append the next feed page when the sentinel nears the
+  // viewport. Only the browse feed paginates; searches return one page.
+  async function loadMore() {
+    if (loading || loadingMore || !hasMore || query.trim()) return;
+    setLoadingMore(true);
+    try {
+      const next = pageRef.current + 1;
+      const res = await fetch(`/api/search?page=${next}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load more");
+      pageRef.current = next;
+      setItems((prev) => {
+        const seen = new Set(prev.map((i) => `${i.mediaType}:${i.id}`));
+        const fresh = (data.items ?? []).filter(
+          (i: SearchResult) => !seen.has(`${i.mediaType}:${i.id}`),
+        );
+        return [...prev, ...fresh];
+      });
+      setHasMore(Boolean(data.hasMore));
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+  loadMoreRef.current = loadMore;
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMoreRef.current();
+      },
+      { rootMargin: "600px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const removeItem = (rec: Recommendation) =>
     setItems((prev) =>
@@ -191,7 +242,11 @@ export default function SearchPage() {
         </div>
       ) : !searching ? (
         <>
-          <p className="mb-6 text-sm text-white/50">Most popular right now</p>
+          <p className="mb-6 text-sm text-white/50">
+            {mode === "curated"
+              ? "Recommended for you — based on your watchlist, likes, and dislikes"
+              : "Most popular right now"}
+          </p>
           {renderGrid(visible)}
         </>
       ) : (
@@ -217,6 +272,17 @@ export default function SearchPage() {
             </section>
           )}
         </>
+      )}
+
+      {/* Infinite-scroll sentinel for the browse feed. */}
+      <div ref={sentinelRef} aria-hidden className="h-px" />
+      {loadingMore && (
+        <p className="mt-8 animate-pulse-glow text-center text-white/40">Loading more…</p>
+      )}
+      {!loading && !searching && !hasMore && visible.length > 0 && (
+        <p className="mt-8 text-center text-xs text-white/30">
+          You&apos;ve reached the end of your recommendations.
+        </p>
       )}
     </main>
   );

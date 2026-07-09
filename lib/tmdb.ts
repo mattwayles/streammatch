@@ -98,18 +98,113 @@ function toBasicRec(t: RawSearchTitle, mediaType: MediaType): Recommendation {
   };
 }
 
-/** Top titles (movies + TV merged) sorted by TMDB popularity. */
-export async function popularTitles(): Promise<Recommendation[]> {
+/** Top titles (movies + TV merged) sorted by TMDB popularity. Paginated. */
+export async function popularTitles(
+  page = 1,
+): Promise<{ items: Recommendation[]; hasMore: boolean }> {
   const [movies, tv] = await Promise.all([
-    tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region() }),
-    tmdb<{ results: RawSearchTitle[] }>("/tv/popular"),
+    tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region(), page }),
+    tmdb<{ results: RawSearchTitle[] }>("/tv/popular", { page }),
   ]);
   const merged = [
     ...(movies.results ?? []).map((t) => ({ t, type: "movie" as MediaType })),
     ...(tv.results ?? []).map((t) => ({ t, type: "tv" as MediaType })),
   ];
   merged.sort((a, b) => (b.t.popularity ?? 0) - (a.t.popularity ?? 0));
-  return merged.slice(0, SEARCH_RESULT_CAP).map(({ t, type }) => toBasicRec(t, type));
+  return {
+    items: merged.map(({ t, type }) => toBasicRec(t, type)),
+    hasMore: page < 10,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Curated feed — personalized browse built from the user's lists.
+// ---------------------------------------------------------------------------
+
+export interface SeedRef {
+  tmdbId: number;
+  mediaType: MediaType;
+}
+
+const FEED_PAGE_SIZE = 24;
+const FEED_TTL_MS = 5 * 60_000;
+/** Most recent titles taken per list as recommendation seeds. */
+const POSITIVE_SEED_CAP = 8;
+const NEGATIVE_SEED_CAP = 8;
+const LIKED_WEIGHT = 2;
+const WATCHLIST_WEIGHT = 1;
+const DISLIKED_PENALTY = 3;
+
+// The scored pool is deterministic for a given set of seeds, so pages sliced
+// from it stay consistent while the user scrolls. Cached per warm instance.
+const feedCache = new Map<string, { pool: Recommendation[]; expires: number }>();
+
+async function recsForSeed(seed: SeedRef): Promise<RawSearchTitle[]> {
+  try {
+    const d = await tmdb<{ results: RawSearchTitle[] }>(
+      `/${seed.mediaType}/${seed.tmdbId}/recommendations`,
+    );
+    return d.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Personalized browse feed: TMDB "more like this" seeded from the user's
+ * watchlist and liked titles, down-ranked by anything associated with their
+ * disliked titles. Liked/disliked titles themselves are excluded.
+ */
+export async function curatedFeed(opts: {
+  liked: SeedRef[];
+  watchlist: SeedRef[];
+  disliked: SeedRef[];
+  page: number;
+}): Promise<{ items: Recommendation[]; hasMore: boolean }> {
+  const seeds = [
+    ...opts.liked.slice(0, POSITIVE_SEED_CAP).map((seed) => ({ seed, weight: LIKED_WEIGHT })),
+    ...opts.watchlist
+      .slice(0, POSITIVE_SEED_CAP)
+      .map((seed) => ({ seed, weight: WATCHLIST_WEIGHT })),
+    ...opts.disliked
+      .slice(0, NEGATIVE_SEED_CAP)
+      .map((seed) => ({ seed, weight: -DISLIKED_PENALTY })),
+  ];
+
+  const cacheKey = seeds.map((s) => `${s.weight}:${s.seed.mediaType}:${s.seed.tmdbId}`).join(",");
+  const cached = feedCache.get(cacheKey);
+  let pool: Recommendation[];
+  if (cached && cached.expires > Date.now()) {
+    pool = cached.pool;
+  } else {
+    const exclude = new Set(
+      [...opts.liked, ...opts.disliked].map((s) => `${s.mediaType}:${s.tmdbId}`),
+    );
+    const scored = new Map<string, { t: RawSearchTitle; type: MediaType; score: number }>();
+    const lists = await Promise.all(seeds.map(({ seed }) => recsForSeed(seed)));
+    lists.forEach((results, i) => {
+      const { weight } = seeds[i];
+      for (const t of results) {
+        const type: MediaType = t.media_type === "tv" ? "tv" : "movie";
+        const key = `${type}:${t.id}`;
+        if (exclude.has(key)) continue;
+        const entry = scored.get(key) ?? { t, type, score: 0 };
+        entry.score += weight;
+        scored.set(key, entry);
+      }
+    });
+    pool = [...scored.values()]
+      .filter((e) => e.score > 0)
+      .sort((a, b) => b.score - a.score || (b.t.popularity ?? 0) - (a.t.popularity ?? 0))
+      .map((e) => toBasicRec(e.t, e.type));
+    feedCache.set(cacheKey, { pool, expires: Date.now() + FEED_TTL_MS });
+  }
+
+  const start = (opts.page - 1) * FEED_PAGE_SIZE;
+  return {
+    items: pool.slice(start, start + FEED_PAGE_SIZE),
+    hasMore: start + FEED_PAGE_SIZE < pool.length,
+  };
 }
 
 /**
