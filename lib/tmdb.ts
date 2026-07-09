@@ -106,30 +106,26 @@ function toBasicRec(t: RawSearchTitle, mediaType: MediaType): Recommendation {
 }
 
 /** Top titles (movies + TV merged) sorted by TMDB popularity. Paginated.
- * With a language, uses discover + with_original_language so pages stay full
+ * TMDB's popularity metric is global, so regional relevance comes from
+ * `watch_region` + streamable-only: what's popular AND watchable where the
+ * user is. Language filtering uses with_original_language so pages stay full
  * instead of thinning out from post-filtering. */
 export async function popularTitles(
   page = 1,
   language?: string,
+  watchRegion?: string,
 ): Promise<{ items: Recommendation[]; hasMore: boolean }> {
+  const params = {
+    sort_by: "popularity.desc",
+    include_adult: "false",
+    with_original_language: language || undefined,
+    watch_region: watchRegion || region(),
+    with_watch_monetization_types: "flatrate|free|ads",
+    page,
+  };
   const [movies, tv] = await Promise.all([
-    language
-      ? tmdb<{ results: RawSearchTitle[] }>("/discover/movie", {
-          sort_by: "popularity.desc",
-          include_adult: "false",
-          with_original_language: language,
-          region: region(),
-          page,
-        })
-      : tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region(), page }),
-    language
-      ? tmdb<{ results: RawSearchTitle[] }>("/discover/tv", {
-          sort_by: "popularity.desc",
-          include_adult: "false",
-          with_original_language: language,
-          page,
-        })
-      : tmdb<{ results: RawSearchTitle[] }>("/tv/popular", { page }),
+    tmdb<{ results: RawSearchTitle[] }>("/discover/movie", { ...params, region: params.watch_region }),
+    tmdb<{ results: RawSearchTitle[] }>("/discover/tv", params),
   ]);
   const merged = [
     ...(movies.results ?? []).map((t) => ({ t, type: "movie" as MediaType })),

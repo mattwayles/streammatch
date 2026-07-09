@@ -6,7 +6,24 @@ interface SettingsState {
   nuvioConfigured: boolean;
   nuvio_sync_enabled: boolean;
   preferred_language: string;
+  preferred_region: string;
 }
+
+const REGIONS = [
+  { code: "US", label: "United States" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "CA", label: "Canada" },
+  { code: "AU", label: "Australia" },
+  { code: "DE", label: "Germany" },
+  { code: "FR", label: "France" },
+  { code: "ES", label: "Spain" },
+  { code: "IT", label: "Italy" },
+  { code: "BR", label: "Brazil" },
+  { code: "MX", label: "Mexico" },
+  { code: "IN", label: "India" },
+  { code: "JP", label: "Japan" },
+  { code: "KR", label: "South Korea" },
+];
 
 const LANGUAGES = [
   { code: "", label: "Any language" },
@@ -73,6 +90,10 @@ export default function SettingsMenu() {
             typeof data.settings?.preferred_language === "string"
               ? data.settings.preferred_language
               : "en",
+          preferred_region:
+            typeof data.settings?.preferred_region === "string"
+              ? data.settings.preferred_region
+              : "US",
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -80,7 +101,10 @@ export default function SettingsMenu() {
     })();
   }, [open, state]);
 
-  async function saveSetting(key: "nuvio_sync_enabled" | "preferred_language", value: boolean | string) {
+  async function saveSetting(
+    key: "nuvio_sync_enabled" | "preferred_language" | "preferred_region",
+    value: boolean | string,
+  ) {
     if (!state) return;
     const prev = state[key];
     setState({ ...state, [key]: value });
@@ -173,6 +197,27 @@ export default function SettingsMenu() {
                     {LANGUAGES.map((l) => (
                       <option key={l.code} value={l.code}>
                         {l.label}
+                      </option>
+                    ))}
+                  </select>
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-medium text-white">Region</p>
+                    <p className="mt-1 text-sm text-white/50">
+                      The Popular feed shows titles streamable in this country, so it
+                      reflects what&apos;s watchable where you are.
+                    </p>
+                  </div>
+                  <select
+                    value={state.preferred_region}
+                    onChange={(e) => saveSetting("preferred_region", e.target.value)}
+                    aria-label="Region"
+                    className="glass shrink-0 rounded-full bg-transparent px-4 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-white/25 [&>option]:bg-ink-900"
+                  >
+                    {REGIONS.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.label}
                       </option>
                     ))}
                   </select>

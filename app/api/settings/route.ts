@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 const SETTING_TYPES: Record<string, "boolean" | "string"> = {
   nuvio_sync_enabled: "boolean",
   preferred_language: "string",
+  preferred_region: "string",
 };
 
 export async function GET() {
@@ -21,6 +22,10 @@ export async function GET() {
         nuvio_sync_enabled: stored.nuvio_sync_enabled !== false,
         preferred_language:
           typeof stored.preferred_language === "string" ? stored.preferred_language : "en",
+        preferred_region:
+          typeof stored.preferred_region === "string"
+            ? stored.preferred_region
+            : process.env.TMDB_REGION || "US",
       },
     });
   } catch (err) {

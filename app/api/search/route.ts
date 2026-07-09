@@ -50,10 +50,15 @@ export async function GET(req: Request) {
     // ("recommended") uses the curated feed whenever seeds exist.
     const wantPopular = url.searchParams.get("feed") === "popular";
 
-    // Preferred original language from Settings; defaults to English, "" = any.
+    // Preferred original language and region from Settings; language defaults
+    // to English ("" = any), region to the TMDB_REGION env (US).
     const stored = await getAppSettings();
     const language =
       typeof stored.preferred_language === "string" ? stored.preferred_language : "en";
+    const watchRegion =
+      typeof stored.preferred_region === "string" && stored.preferred_region
+        ? stored.preferred_region
+        : process.env.TMDB_REGION || "US";
 
     if (q) {
       const [titles, watchlist, liked, disliked] = await Promise.all([
@@ -87,7 +92,7 @@ export async function GET(req: Request) {
           page,
           language,
         })
-      : await popularTitles(page, language);
+      : await popularTitles(page, language, watchRegion);
 
     return NextResponse.json({
       items: annotate(titles, toKeys(watchlistItems), toKeys(likedItems), toKeys(dislikedItems)),
