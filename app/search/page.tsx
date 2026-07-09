@@ -17,6 +17,9 @@ export default function SearchPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [mode, setMode] = useState<BrowseMode>("popular");
+  // Which browse feed the user wants when not searching. "recommended" falls
+  // back to popular server-side when the lists are empty.
+  const [feedMode, setFeedMode] = useState<"recommended" | "popular">("recommended");
   const [error, setError] = useState<string | null>(null);
   const [hideWatchlist, setHideWatchlist] = useState(false);
   // Hidden by default: the browse feed is a recommendations surface, so
@@ -38,9 +41,10 @@ export default function SearchPage() {
         setLoading(true);
         setError(null);
         try {
-          const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}&page=1`, {
-            signal: controller.signal,
-          });
+          const res = await fetch(
+            `/api/search?q=${encodeURIComponent(query.trim())}&page=1&feed=${feedMode}`,
+            { signal: controller.signal },
+          );
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || "Search failed");
           pageRef.current = 1;
@@ -57,7 +61,7 @@ export default function SearchPage() {
       query.trim() ? DEBOUNCE_MS : 0,
     );
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, feedMode]);
 
   // Infinite scroll: append the next feed page when the sentinel nears the
   // viewport. Only the browse feed paginates; searches return one page.
@@ -66,7 +70,7 @@ export default function SearchPage() {
     setLoadingMore(true);
     try {
       const next = pageRef.current + 1;
-      const res = await fetch(`/api/search?page=${next}`);
+      const res = await fetch(`/api/search?page=${next}&feed=${feedMode}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load more");
       pageRef.current = next;
@@ -271,11 +275,33 @@ export default function SearchPage() {
         </div>
       ) : !searching ? (
         <>
-          <p className="mb-6 text-sm text-white/50">
-            {mode === "curated"
-              ? "Recommended for you — based on your watchlist, likes, and dislikes"
-              : "Most popular right now"}
-          </p>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-white/50">
+              {mode === "curated"
+                ? "Recommended for you — based on your watchlist, likes, and dislikes"
+                : "Most popular right now"}
+            </p>
+            <div className="glass flex rounded-full p-1 text-sm font-semibold">
+              <button
+                onClick={() => setFeedMode("recommended")}
+                aria-pressed={feedMode === "recommended"}
+                className={`rounded-full px-4 py-1.5 transition ${
+                  feedMode === "recommended" ? "bg-glow/80 text-white" : "text-white/60 hover:text-white"
+                }`}
+              >
+                ✨ Recommended
+              </button>
+              <button
+                onClick={() => setFeedMode("popular")}
+                aria-pressed={feedMode === "popular"}
+                className={`rounded-full px-4 py-1.5 transition ${
+                  feedMode === "popular" ? "bg-glow/80 text-white" : "text-white/60 hover:text-white"
+                }`}
+              >
+                🔥 Popular
+              </button>
+            </div>
+          </div>
           {renderGrid(visible)}
         </>
       ) : (
@@ -310,7 +336,9 @@ export default function SearchPage() {
       )}
       {!loading && !searching && !hasMore && visible.length > 0 && (
         <p className="mt-8 text-center text-xs text-white/30">
-          You&apos;ve reached the end of your recommendations.
+          {mode === "curated"
+            ? "You've reached the end of your recommendations."
+            : "You've reached the end of the popular feed."}
         </p>
       )}
     </main>

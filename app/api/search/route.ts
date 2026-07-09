@@ -45,6 +45,9 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const q = url.searchParams.get("q")?.trim() ?? "";
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+    // feed=popular forces the unpersonalized popularity feed; the default
+    // ("recommended") uses the curated feed whenever seeds exist.
+    const wantPopular = url.searchParams.get("feed") === "popular";
 
     if (q) {
       const [titles, watchlist, liked, disliked] = await Promise.all([
@@ -68,9 +71,9 @@ export async function GET(req: Request) {
     const toSeed = (i: ListItem) => ({ tmdbId: i.tmdbId, mediaType: i.mediaType });
     const toKeys = (items: ListItem[]) =>
       new Set(items.map((i) => itemKey(i.mediaType, i.tmdbId)));
-    const hasSeeds = watchlistItems.length + likedItems.length > 0;
+    const useCurated = !wantPopular && watchlistItems.length + likedItems.length > 0;
 
-    const { items: titles, hasMore } = hasSeeds
+    const { items: titles, hasMore } = useCurated
       ? await curatedFeed({
           liked: likedItems.map(toSeed),
           watchlist: watchlistItems.map(toSeed),
@@ -82,7 +85,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       items: annotate(titles, toKeys(watchlistItems), toKeys(likedItems), toKeys(dislikedItems)),
       hasMore,
-      mode: hasSeeds ? "curated" : "popular",
+      mode: useCurated ? "curated" : "popular",
     });
   } catch (err) {
     console.error("[/api/search GET]", err);
