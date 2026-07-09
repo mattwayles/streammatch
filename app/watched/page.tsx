@@ -62,6 +62,32 @@ function useList(kind: Kind) {
   return { items, configured, loading, error, pending, remove };
 }
 
+/** Case-insensitive title filter shared by the library sections. */
+function matchesFilter(item: ListItem, filter: string): boolean {
+  const q = filter.trim().toLowerCase();
+  return !q || (item.title || `TMDB #${item.tmdbId}`).toLowerCase().includes(q);
+}
+
+function FilterInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      type="search"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="glass w-full max-w-xs rounded-full px-4 py-2 text-sm text-white placeholder-white/40 outline-none transition focus:ring-2 focus:ring-white/25"
+    />
+  );
+}
+
 function StatusPanel({
   loading,
   error,
@@ -91,10 +117,17 @@ function StatusPanel({
 /** Watchlist rendered as a grid of poster thumbnails. */
 function WatchlistGrid() {
   const { items, configured, loading, error, pending, remove } = useList("watchlist");
+  const [filter, setFilter] = useState("");
+  const visible = items.filter((i) => matchesFilter(i, filter));
 
   return (
     <section className="mb-12">
-      <h2 className="font-display text-2xl font-semibold text-white">🔖 Watch List</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-2xl font-semibold text-white">🔖 Watch List</h2>
+        {items.length > 0 && (
+          <FilterInput value={filter} onChange={setFilter} placeholder="Filter watch list…" />
+        )}
+      </div>
       <p className="mb-4 mt-1 text-sm text-white/50">
         Titles you&apos;ve saved to watch later. Pick &lsquo;Something from my watch list&rsquo; at
         the start to surface these.
@@ -108,9 +141,15 @@ function WatchlistGrid() {
         emptyText="Nothing saved to your watch list yet."
       />
 
-      {!loading && !error && configured && items.length > 0 && (
+      {!loading && !error && configured && items.length > 0 && visible.length === 0 && (
+        <div className="glass rounded-2xl p-8 text-center text-white/60">
+          No watch list titles match &ldquo;{filter.trim()}&rdquo;.
+        </div>
+      )}
+
+      {!loading && !error && configured && visible.length > 0 && (
         <ul className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
-          {items.map((item) => {
+          {visible.map((item) => {
             const key = `${item.mediaType}:${item.tmdbId}`;
             return (
               <li key={key} className="group">
@@ -168,6 +207,8 @@ function CollapsibleListSection({
 }) {
   const { items, configured, loading, error, pending, remove } = useList(kind);
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const visible = items.filter((i) => matchesFilter(i, filter));
 
   return (
     <section className="mb-6">
@@ -206,8 +247,22 @@ function CollapsibleListSection({
               emptyText={emptyText}
             />
             {!loading && !error && configured && items.length > 0 && (
+              <div className="mb-4">
+                <FilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  placeholder={`Filter ${title.replace(/^\S+\s/, "").toLowerCase()} titles…`}
+                />
+              </div>
+            )}
+            {!loading && !error && configured && items.length > 0 && visible.length === 0 && (
+              <div className="glass rounded-2xl p-6 text-center text-white/60">
+                No titles match &ldquo;{filter.trim()}&rdquo;.
+              </div>
+            )}
+            {!loading && !error && configured && visible.length > 0 && (
               <ul className="flex flex-col gap-3">
-                {items.map((item) => {
+                {visible.map((item) => {
                   const key = `${item.mediaType}:${item.tmdbId}`;
                   return (
                     <li
