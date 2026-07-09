@@ -87,7 +87,24 @@ export default function SearchPage() {
   }
 
   const visible = hideWatchlist ? items.filter((i) => !i.inWatchlist) : items;
+  const matches = visible.filter((i) => !i.related);
+  const related = visible.filter((i) => i.related);
   const searching = query.trim().length > 0;
+
+  const renderGrid = (list: SearchResult[]) => (
+    <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+      {list.map((item) => (
+        <ResultCard
+          key={`${item.mediaType}-${item.id}`}
+          rec={item}
+          inWatchlist={item.inWatchlist}
+          onDisliked={(rec) => hideAndPost(rec, "/api/disliked")}
+          onLiked={(rec) => hideAndPost(rec, "/api/liked")}
+          onWatchlist={addToWatchlist}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-16">
@@ -136,12 +153,6 @@ export default function SearchPage() {
         </label>
       </div>
 
-      <p className="mb-6 text-sm text-white/50">
-        {searching
-          ? "Matches and related picks you may like"
-          : "Most popular right now"}
-      </p>
-
       {loading ? (
         <p className="animate-pulse-glow text-white/40">
           {searching ? "Searching…" : "Loading…"}
@@ -156,19 +167,34 @@ export default function SearchPage() {
               : "No matches found. Try a different title."}
           </p>
         </div>
+      ) : !searching ? (
+        <>
+          <p className="mb-6 text-sm text-white/50">Most popular right now</p>
+          {renderGrid(visible)}
+        </>
       ) : (
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-          {visible.map((item) => (
-            <ResultCard
-              key={`${item.mediaType}-${item.id}`}
-              rec={item.related ? { ...item, vibeCheck: "Related pick" } : item}
-              inWatchlist={item.inWatchlist}
-              onDisliked={(rec) => hideAndPost(rec, "/api/disliked")}
-              onLiked={(rec) => hideAndPost(rec, "/api/liked")}
-              onWatchlist={addToWatchlist}
-            />
-          ))}
-        </div>
+        <>
+          {matches.length > 0 && (
+            <section className="mb-12">
+              <h2 className="mb-1 font-display text-2xl font-semibold text-white">Matches</h2>
+              <p className="mb-6 text-sm text-white/50">
+                Titles matching your search.
+              </p>
+              {renderGrid(matches)}
+            </section>
+          )}
+          {related.length > 0 && (
+            <section>
+              <h2 className="mb-1 font-display text-2xl font-semibold text-white">
+                You may also like
+              </h2>
+              <p className="mb-6 text-sm text-white/50">
+                Related picks based on the closest matches.
+              </p>
+              {renderGrid(related)}
+            </section>
+          )}
+        </>
       )}
     </main>
   );
