@@ -140,6 +140,34 @@ async function unmark(kind: ListKind, tmdbId: number, mediaType: MediaType): Pro
 }
 
 // ---------------------------------------------------------------------------
+// App settings — shared key/value store (values are JSON).
+// ---------------------------------------------------------------------------
+
+const SETTINGS_TABLE = "streammatch_settings";
+
+/** All stored settings as a key → value map. Empty on any failure so callers
+ * fall back to defaults (e.g. before the settings table migration is run). */
+export async function getAppSettings(): Promise<Record<string, unknown>> {
+  const c = client();
+  if (!c) return {};
+  const { data, error } = await c.from(SETTINGS_TABLE).select("key, value");
+  if (error) {
+    console.error("[supabase] getAppSettings:", error.message);
+    return {};
+  }
+  return Object.fromEntries((data ?? []).map((r) => [r.key as string, r.value]));
+}
+
+export async function setAppSetting(key: string, value: unknown): Promise<void> {
+  const c = client();
+  if (!c) throw new Error("Supabase is not configured");
+  const { error } = await c
+    .from(SETTINGS_TABLE)
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) throw new Error(error.message);
+}
+
+// ---------------------------------------------------------------------------
 // Disliked
 // ---------------------------------------------------------------------------
 

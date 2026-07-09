@@ -109,6 +109,35 @@ create policy "streammatch_watchlist anon update"
   using (true)
   with check (true);
 
+-- App settings: shared key/value store for user-facing configuration
+-- (e.g. toggling Nuvio sync). Values are JSON.
+create table if not exists public.streammatch_settings (
+  key         text primary key,
+  value       jsonb not null,
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.streammatch_settings enable row level security;
+
+drop policy if exists "streammatch_settings anon select" on public.streammatch_settings;
+create policy "streammatch_settings anon select"
+  on public.streammatch_settings
+  for select to anon
+  using (true);
+
+drop policy if exists "streammatch_settings anon insert" on public.streammatch_settings;
+create policy "streammatch_settings anon insert"
+  on public.streammatch_settings
+  for insert to anon
+  with check (true);
+
+drop policy if exists "streammatch_settings anon update" on public.streammatch_settings;
+create policy "streammatch_settings anon update"
+  on public.streammatch_settings
+  for update to anon
+  using (true)
+  with check (true);
+
 -- Liked titles: watched and enjoyed — used as a strong positive-taste signal
 -- so the curator prioritizes similar genres, tones, and themes.
 create table if not exists public.streammatch_liked (

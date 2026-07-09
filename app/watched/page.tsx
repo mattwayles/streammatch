@@ -249,6 +249,21 @@ function CollapsibleListSection({
 function NuvioSync({ onSynced }: { onSynced: () => void }) {
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        const data = await res.json();
+        setEnabled(
+          Boolean(data.nuvioConfigured) && data.settings?.nuvio_sync_enabled !== false,
+        );
+      } catch {
+        // Leave the button hidden; the API enforces the setting regardless.
+      }
+    })();
+  }, []);
 
   async function sync() {
     setSyncing(true);
@@ -269,6 +284,8 @@ function NuvioSync({ onSynced }: { onSynced: () => void }) {
       setSyncing(false);
     }
   }
+
+  if (!enabled) return null;
 
   return (
     <div className="flex flex-col items-end gap-2">

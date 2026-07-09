@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { isNuvioConfigured, parseNuvioItem, pullNuvioLibrary } from "@/lib/nuvio";
+import {
+  isNuvioConfigured,
+  isNuvioSyncEnabled,
+  parseNuvioItem,
+  pullNuvioLibrary,
+} from "@/lib/nuvio";
 import { findByImdbId } from "@/lib/tmdb";
 import {
   getDislikedKeys,
@@ -40,6 +45,12 @@ export async function POST() {
     if (!isConfigured()) {
       return NextResponse.json(
         { error: "Supabase is not configured (set SUPABASE_URL and SUPABASE_ANON_KEY)." },
+        { status: 400 },
+      );
+    }
+    if (!(await isNuvioSyncEnabled())) {
+      return NextResponse.json(
+        { error: "Nuvio sync is disabled in Settings." },
         { status: 400 },
       );
     }

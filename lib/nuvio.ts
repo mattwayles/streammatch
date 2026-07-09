@@ -1,3 +1,4 @@
+import { getAppSettings } from "./supabase";
 import type { MediaType } from "./types";
 
 // Nuvio Public API (https://nuvioapp.space/docs) — Supabase-backed REST/RPC.
@@ -13,6 +14,17 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 export function isNuvioConfigured(): boolean {
   return Boolean(process.env.NUVIO_EMAIL && process.env.NUVIO_PASSWORD);
+}
+
+/**
+ * Whether Nuvio interactions should run: credentials must be configured AND
+ * the user-facing "Nuvio sync" setting must not be switched off. Defaults to
+ * enabled when the setting has never been stored.
+ */
+export async function isNuvioSyncEnabled(): Promise<boolean> {
+  if (!isNuvioConfigured()) return false;
+  const settings = await getAppSettings();
+  return settings.nuvio_sync_enabled !== false;
 }
 
 function profileId(): number {

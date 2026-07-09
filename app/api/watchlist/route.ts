@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addToNuvioLibrary, isNuvioConfigured } from "@/lib/nuvio";
+import { addToNuvioLibrary, isNuvioSyncEnabled } from "@/lib/nuvio";
 import {
   isConfigured,
   listWatchlist,
@@ -61,10 +61,10 @@ export async function POST(req: Request) {
     const poster = typeof body?.poster === "string" ? body.poster : null;
     await markWatchlist(tmdbId, mediaType, title, poster);
 
-    // Mirror the new item to the Nuvio library. Best-effort: a Nuvio outage
-    // must never block saving to the local watchlist.
+    // Mirror the new item to the Nuvio library (when configured and enabled in
+    // Settings). Best-effort: a Nuvio outage must never block the local save.
     let nuvio: "synced" | "skipped" | "failed" = "skipped";
-    if (isNuvioConfigured()) {
+    if (await isNuvioSyncEnabled()) {
       try {
         await addToNuvioLibrary({
           tmdbId,
