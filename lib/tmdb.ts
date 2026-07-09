@@ -55,6 +55,115 @@ export function imageUrl(path: string | null | undefined, size: string): string 
   return path ? `${IMG_BASE}/${size}${path}` : null;
 }
 
+// ---------------------------------------------------------------------------
+// Search & browse
+// ---------------------------------------------------------------------------
+
+const SEARCH_RESULT_CAP = 25;
+const DIRECT_MATCH_CAP = 15;
+/** How many top query matches to expand with TMDB's "more like this". */
+const RELATED_SEED_COUNT = 3;
+
+interface RawSearchTitle {
+  id: number;
+  media_type?: string;
+  title?: string;
+  name?: string;
+  overview?: string;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+}
+
+/** Map a raw TMDB title to the Recommendation shape (editorial fields empty). */
+function toBasicRec(t: RawSearchTitle, mediaType: MediaType): Recommendation {
+  return {
+    id: t.id,
+    mediaType,
+    title: t.title || t.name || "Untitled",
+    year: (t.release_date || t.first_air_date || "").slice(0, 4) || null,
+    description: t.overview ?? "",
+    rating: t.vote_average ?? 0,
+    voteCount: t.vote_count ?? 0,
+    screenshotUrl: imageUrl(t.backdrop_path, "w1280") ?? imageUrl(t.poster_path, "w500"),
+    posterUrl: imageUrl(t.poster_path, "w500"),
+    providers: [],
+    reviews: [],
+    whyThisFits: "",
+    vibeCheck: "",
+  };
+}
+
+/** Top titles (movies + TV merged) sorted by TMDB popularity. */
+export async function popularTitles(): Promise<Recommendation[]> {
+  const [movies, tv] = await Promise.all([
+    tmdb<{ results: RawSearchTitle[] }>("/movie/popular", { region: region() }),
+    tmdb<{ results: RawSearchTitle[] }>("/tv/popular"),
+  ]);
+  const merged = [
+    ...(movies.results ?? []).map((t) => ({ t, type: "movie" as MediaType })),
+    ...(tv.results ?? []).map((t) => ({ t, type: "tv" as MediaType })),
+  ];
+  merged.sort((a, b) => (b.t.popularity ?? 0) - (a.t.popularity ?? 0));
+  return merged.slice(0, SEARCH_RESULT_CAP).map(({ t, type }) => toBasicRec(t, type));
+}
+
+/**
+ * Search TMDB for titles matching `query`, then pad with "more like this"
+ * recommendations seeded from the top matches. Related items carry
+ * `related: true` so the UI can label them.
+ */
+export async function searchTitles(
+  query: string,
+): Promise<(Recommendation & { related: boolean })[]> {
+  const data = await tmdb<{ results: RawSearchTitle[] }>("/search/multi", {
+    query,
+    include_adult: "false",
+  });
+  const matches = (data.results ?? []).filter(
+    (t) => t.media_type === "movie" || t.media_type === "tv",
+  );
+
+  const out: (Recommendation & { related: boolean })[] = [];
+  const seen = new Set<string>();
+  for (const t of matches.slice(0, DIRECT_MATCH_CAP)) {
+    const type = t.media_type as MediaType;
+    seen.add(`${type}:${t.id}`);
+    out.push({ ...toBasicRec(t, type), related: false });
+  }
+
+  // "Related content you may like" — TMDB's per-title recommendations for the
+  // strongest matches, deduped against the direct results.
+  const seeds = matches.slice(0, RELATED_SEED_COUNT);
+  const recLists = await Promise.allSettled(
+    seeds.map((s) =>
+      tmdb<{ results: RawSearchTitle[] }>(`/${s.media_type}/${s.id}/recommendations`),
+    ),
+  );
+  const related: { t: RawSearchTitle; type: MediaType }[] = [];
+  for (const settled of recLists) {
+    if (settled.status !== "fulfilled") continue;
+    for (const t of settled.value.results ?? []) {
+      const type = (t.media_type === "tv" ? "tv" : "movie") as MediaType;
+      const key = `${type}:${t.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      related.push({ t, type });
+    }
+  }
+  related.sort((a, b) => (b.t.popularity ?? 0) - (a.t.popularity ?? 0));
+  for (const { t, type } of related) {
+    if (out.length >= SEARCH_RESULT_CAP) break;
+    out.push({ ...toBasicRec(t, type), related: true });
+  }
+
+  return out;
+}
+
 /** Fetch a title's poster URL by TMDB id. Null when unknown or missing art. */
 export async function posterFor(mediaType: MediaType, tmdbId: number): Promise<string | null> {
   try {

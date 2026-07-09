@@ -134,6 +134,12 @@ export default function Hero({
           >
             I don&apos;t know, grill me
           </button>
+          <Link
+            href="/search"
+            className="glass glass-hover rounded-full px-6 py-3 text-sm font-semibold"
+          >
+            🔍 Search
+          </Link>
         </div>
 
         {listening && (

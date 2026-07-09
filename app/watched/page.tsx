@@ -109,7 +109,7 @@ function WatchlistGrid() {
       />
 
       {!loading && !error && configured && items.length > 0 && (
-        <ul className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5">
+        <ul className="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
           {items.map((item) => {
             const key = `${item.mediaType}:${item.tmdbId}`;
             return (

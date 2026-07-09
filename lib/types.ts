@@ -60,6 +60,18 @@ export interface Provider {
   logoUrl: string | null;
 }
 
+/**
+ * A search/browse result returned by `/api/search`. Shares the Recommendation
+ * shape so it renders with the same result cards; the Claude editorial fields
+ * are empty and `related`/`inWatchlist` drive search-specific UI.
+ */
+export interface SearchResult extends Recommendation {
+  /** Already on the user's watchlist (drives the disabled Watch Later state). */
+  inWatchlist: boolean;
+  /** True when surfaced from "more like this" rather than a direct query match. */
+  related: boolean;
+}
+
 /** A fully assembled recommendation returned by `/api/recommend`. */
 export interface Recommendation {
   id: number;

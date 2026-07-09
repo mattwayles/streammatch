@@ -10,15 +10,23 @@ export default function ResultCard({
   onDisliked,
   onLiked,
   onWatchlist,
+  inWatchlist = false,
 }: {
   rec: Recommendation;
   onDisliked: (rec: Recommendation) => void;
   onLiked: (rec: Recommendation) => void;
   onWatchlist: (rec: Recommendation) => void;
+  /** Already on the watchlist — renders a disabled Watch Later button. */
+  inWatchlist?: boolean;
 }) {
   const [showReviews, setShowReviews] = useState(false);
   const [savedToWatchlist, setSavedToWatchlist] = useState(false);
   const formatLabel = rec.mediaType === "tv" ? "TV / Series" : "Movie";
+  const watchlistLabel = inWatchlist
+    ? "🔖 On your watchlist"
+    : savedToWatchlist
+      ? "🔖 Saved"
+      : "🔖 Watch Later";
 
   return (
     <article className="glass animate-fade-up overflow-hidden rounded-3xl shadow-card">
@@ -46,9 +54,11 @@ export default function ResultCard({
             <span className="rounded-full bg-glow/80 px-2.5 py-1 text-xs font-semibold">
               {formatLabel}
             </span>
-            <span className="rounded-full bg-black/50 px-2.5 py-1 text-xs font-medium text-white/90 backdrop-blur">
-              {rec.vibeCheck}
-            </span>
+            {rec.vibeCheck && (
+              <span className="rounded-full bg-black/50 px-2.5 py-1 text-xs font-medium text-white/90 backdrop-blur">
+                {rec.vibeCheck}
+              </span>
+            )}
           </div>
           <h3 className="font-display text-2xl font-bold leading-tight text-glow">
             {rec.title}
@@ -75,12 +85,14 @@ export default function ResultCard({
           {rec.providers.length > 0 && <ProviderBadges providers={rec.providers} />}
         </div>
 
-        <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-glow-soft">
-            Why this fits your mood
-          </p>
-          <p className="text-sm leading-relaxed text-white/85">{rec.whyThisFits}</p>
-        </div>
+        {rec.whyThisFits && (
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-glow-soft">
+              Why this fits your mood
+            </p>
+            <p className="text-sm leading-relaxed text-white/85">{rec.whyThisFits}</p>
+          </div>
+        )}
 
         <p className="text-sm leading-relaxed text-white/55">{rec.description}</p>
 
@@ -99,11 +111,15 @@ export default function ResultCard({
                 setSavedToWatchlist(true);
                 onWatchlist(rec);
               }}
-              disabled={savedToWatchlist}
-              title="Save to your watch list for later"
+              disabled={inWatchlist || savedToWatchlist}
+              title={
+                inWatchlist
+                  ? "This title is already on your watch list"
+                  : "Save to your watch list for later"
+              }
               className="glass glass-hover rounded-full px-4 py-2 text-xs font-semibold text-white/80 disabled:opacity-60"
             >
-              {savedToWatchlist ? "🔖 Saved" : "🔖 Watch Later"}
+              {watchlistLabel}
             </button>
             <button
               onClick={() => onDisliked(rec)}
